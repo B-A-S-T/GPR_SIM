@@ -80,7 +80,7 @@ void parse_source_code(char *filename);
 void load_data(char* token);
 void load_text(char* token, int *index);
 int get_opCode(char* instr);
-mem_word read_mem(mem_addr address);
+char read_mem(mem_addr address);
 instruction read_inst(mem_addr address);
 void write_instr(mem_addr address, instruction instr);
 void write_mem(mem_addr address, char *value);
@@ -91,7 +91,9 @@ instruction type2_create(struct instr_type2 instr);
 instruction type3_create(struct instr_type3 instr);
 int find_label(char* to_search);
 struct instruction_container decode(int to_decode);
-int alu(struct instruction_container instr, op_code);
+int alu(struct instruction_container instr, int op_code);
+int check_allocated(char* match);
+int syscall(mem_word function);
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
@@ -129,37 +131,33 @@ int main(int argc, char *argv[]){
                 }
                 break;
             case 3:
-                to_mult = (mem_addr) read_inst(pc);
-                mult(&accumulator, to_mult);
-                pc +=1;
+                if(alu(instruc, instruc.type1.op_code) == 3){
+                    pc = DATA_START + instruc.type1.label;
+                    pc += 1;
+                }
                 break;
             case 4:
-                usermode = 0;
-                printf("%d\n", accumulator);
+                if(alu(instruc, instruc.type1.op_code) == 4){
+                    pc = DATA_START + instruc.type1.label;
+                    pc += 1;
+                }
                 break;
             case 5:
-                to_print = (mem_addr) read_inst(pc);
-                if(to_print >= last_string || to_print < 0){
-                    printf("Failed to print that string: Wrong Index");
-                }
-                printf("%s", strings[to_print]);
-                pc += 1;
+                REGISTER_FILE[instruc.type2.r_target] = DATA_START + instruc.type2.label;
                 break;
             case 6:
-                usermode = 0;
-                printf("%d\n", accumulator);
+                REGISTER_FILE[instruc.type1.r_dest] = 
+                            read_mem(REGISTER_FILE[instruc.type1.r_src] 
+                            + instruc.type1.label);
                 break;
             case 7:
-                usermode = 0;
-                printf("%d\n", accumulator);
+                REGISTER_FILE[instruc.type2.r_target] = instruc.type2.label;
                 break;
             case 8:
-                usermode = 0;
-                printf("%d\n", accumulator);
+                alu(instruc, instruc.type1.op_code);
                 break;
             case 9:
-                usermode = 0;
-                printf("%d\n", accumulator);
+                syscall(instruc.type3.label);
                 break;
         }
     }
@@ -281,6 +279,7 @@ void load_data(char* token){
 void load_text(char* token, int *index){
     char *instr = strtok(token, " \t");
     int op_code = get_opCode(instr);
+    int *allocated:
     instruction new_instruction;
     mem_addr address = TEXT_START + *index;
     int label_index = 0;
@@ -314,7 +313,13 @@ void load_text(char* token, int *index){
             instruction.label = (mem_word) (*index - label_index);
         }
         if(op_code == 5){
+            allocated = check_allocation(instr);
+            if(allocated != -1){
+                instruction.label = string_address[allocated];
+            }
+            else{
             instruction.label = (((mem_word) strtol(instr, (char **)NULL, 16)) - DATA_START);
+            }
         }
         instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
         new_instruction = type2_create(instruction);
@@ -328,6 +333,16 @@ void load_text(char* token, int *index){
         instr = strtok(NULL, " \t");
         label_index = find_label(instr);
         instruction.label = (mem_word) label_index;
+        new_instruction = type3_create(instruction);
+        write_instr(address, new_instruction);
+        *index += 1;
+    }
+
+    if(op_code == 9){
+        struct instr_type3 instruction;
+        instruction.op_code = op_code;
+        instr = strtok(NULL, " \t");
+        instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
         new_instruction = type3_create(instruction);
         write_instr(address, new_instruction);
         *index += 1;
@@ -415,7 +430,7 @@ int find_label(char* to_search){
           Params: address - address to read from
           Returns: mem_word - returns the contents
 */
-mem_word read_mem(mem_addr address){
+char read_mem(mem_addr address){
     if((address <  DATA_TOP) && (address >= DATA_START))
         return data_segment[(address - DATA_START)];
     else{
@@ -507,7 +522,7 @@ struct instruction_container decode(int to_decode){
         dest = (to_decode >> 23) & 0x0000001f;
         instruction.type2.r_target = dest;
         instruction.type2.label = (to_decode & 0x0007ffff);
-        instruction,type = 2;
+        instruction.type = 2;
     }
     else if(op_code == 1){
         instruction.type3.op_code = op_code;
@@ -517,16 +532,62 @@ struct instruction_container decode(int to_decode){
     return instruction;
 }
 
-int alu(struct instruction_container instr, op_code){
+int alu(struct instruction_container instr, int op_code){
     if(op_code == 1){
         REGISTER_FILE[instr.type1.r_dest] = REGISTER_FILE[instr.type1.r_src]
                                 + instr.type1.label;
-    return 0;
+        return 0;
     }
+
     if(op_code == 2){
         if(REGISTER_FILE[instr.type2.r_target] == 0){
             return 2;
         }
         else return -1;
     }
+
+    if(op_code == 3){
+        if(REGISTER_FILE[instr.type1.r_dest] >= REGISTER_FILE[instr.type1.r_src]){
+            return 3;
+        }
+        else return -1;
+    }
+
+    if(op_code == 4){
+        if(REGISTER_FILE[instr.type1.r_dest] != REGISTER_FILE[instr.type1.r_src]){
+            return 4;
+        }
+        else return -1;
+    }
+
+    if(op_code == 7){
+        REGISTER_FILE[instr.type1.r_dest] = REGISTER_FILE[instr.type1.r_src]
+                                - instr.type1.label;
+        return 0;
+    }
+    return -1;
+    
+}
+
+int syscall(mem_word function){
+    if(function == 0){
+                
+
+    }
+    if(function == 1){
+
+
+    }
+
+}
+int check_allocated(char* match){
+    int i;
+    
+    for(i = 0; i < last_string; i++){
+        if(strcmp(string_allocation[i], match) == 0){
+            return i;
+        }
+    }
+
+    return -1;
 }
