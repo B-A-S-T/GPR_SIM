@@ -260,7 +260,6 @@ void load_text(char* token, int *index){
         if((op_code == 3) || (op_code == 4)){
             label_index = find_label(instr);
             instruction.label = (mem_word) (*index - label_index);
-            printf("OFFSET: %d, LABEL_INDEX: %d\n", instruction.label, label_index);
         }
         instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
         new_instruction = type1_create(instruction);
@@ -277,35 +276,46 @@ void load_text(char* token, int *index){
         if(op_code == 2){
             label_index = find_label(instr);
             instruction.label = (mem_word) (*index - label_index);
-            printf("OFFSET: %d, LABEL_INDEX: %d\n", instruction.label, label_index);
         }
         if(op_code == 5){
             instruction.label = (((mem_word) strtol(instr, (char **)NULL, 16)) - DATA_START);
-            printf("Hi: %d\n", instruction.label);
         }
         instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
-        printf("Hi: %d\n", instruction.label);
         new_instruction = type2_create(instruction);
         write_instr(address, new_instruction);
         *index += 1;
     }
+
     if(op_code == 1){
         struct instr_type3 instruction;
         instruction.op_code = op_code;
-        instr = strtok(NULL, ", ");
-        instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
+        instr = strtok(NULL, " \t");
+        label_index = find_label(instr);
+        instruction.label = (mem_word) (*index - label_index);
         new_instruction = type3_create(instruction);
         write_instr(address, new_instruction);
         *index += 1;
     }
-/*    while(instr != NULL){
-        op_code = get_opCode(instr);
-        mem_addr address = TEXT_START + *index;
-        write_instr(address, op_code);
-        *index += 1;
-        instr = strtok(NULL, " \t");
+
+    if(op_code == 6){
+        struct instr_type1 instruction;
+        char reg[3];
+        char offset[10];
+        int reg_index;
+        instruction.op_code = op_code;
+        instr = strtok(NULL, ", ");
+        instruction.r_dest = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        instr = strtok(NULL, ", ");
+        reg_index = strcspn(instr, "$");
+        memcpy(reg, instr + reg_index + 1, strlen(instr) - reg_index -2);
+        instruction.r_src = strtol(reg, (char **)NULL, 10);
+        memcpy(offset, instr, reg_index - 1);
+        offset[(reg_index-1)] = '\0';
+        instruction.label = (mem_word) strtol(offset, (char **)NULL, 10);
+        new_instruction = type1_create(instruction);
+        write_instr(address, new_instruction);
     }
-*/
+
 }
 /* TYPE 1 instruction encoding: 4 bit OP code, 5 bit Rdest, 5 bit Rsrc, 18 bit Label */
 
