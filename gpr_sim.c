@@ -55,7 +55,7 @@ struct instr_type1{
 };
 struct instr_type2{
     mem_word op_code;
-    mem_word r_src;
+    mem_word r_target;
     mem_word label;
 };
 struct instr_type3{
@@ -243,8 +243,43 @@ void load_data(char* token){
 */
 void load_text(char* token, int *index){
     char *instr = strtok(token, " \t");
-    instruction op_code = 0;
-
+    mem_word op_code = get_opCode(instr);;
+    instruction new_instruction;
+    mem_addr address - TEXT_START + *index;
+    
+    if((op_code == 0) || (op_code == 3) || (op_code == 4) || (op_code = 8)){
+        struct instr_type1 instruction;
+        instruction.op_code = op_code;
+        strtok(NULL, ", ");
+        istruction.r_dest = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        strtok(NULL, ", ");
+        istruction.r_src = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        strtok(NULL, ", ");
+        istruction._label = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        new_instruction = type1_create(instruction);
+        write_instr(address, new_instruction);
+        *index += 1;
+    }
+    if((op_code == 2) || (op_code == 5) || (op_code == 7)){
+        struct instr_type2 instruction;
+        instruction.op_code = op_code;
+        strtok(NULL, ", ");
+        istruction.target = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        strtok(NULL, ", ");
+        istruction._label = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        new_instruction = type2_create(instruction);
+        write_instr(address, new_instruction);
+        *index += 1;
+    }
+    if(op_code == 1){
+        struct instr_type3 instruction;
+        instruction.op_code = op_code;
+        strtok(NULL, ", ");
+        istruction._label = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        new_instruction = type2_create(instruction);
+        write_instr(address, new_instruction);
+        *index += 1;
+    }
     while(instr != NULL){
         op_code = get_opCode(instr);
         mem_addr address = TEXT_START + *index;
