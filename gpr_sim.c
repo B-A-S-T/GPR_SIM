@@ -51,7 +51,7 @@ struct instr_type1{
     mem_word op_code;
     mem_word r_dest;
     mem_word r_src;
-    mem_word _label;
+    mem_word label;
 };
 struct instr_type2{
     mem_word op_code;
@@ -69,7 +69,7 @@ void make_memory();
 void parse_source_code(char *filename);
 void load_data(char* token);
 void load_text(char* token, int *index);
-instruction get_opCode(char* instr);
+int get_opCode(char* instr);
 mem_word read_mem(mem_addr address);
 instruction read_inst(mem_addr address);
 void write_instr(mem_addr address, instruction instr);
@@ -79,13 +79,14 @@ void mult(mem_word* accum, mem_addr operand);
 instruction type1_create(struct instr_type1 instr);
 instruction type2_create(struct instr_type2 instr);
 instruction type3_create(struct instr_type3 instr);
+int find_label(char* to_search);
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
 
     make_memory();
     parse_source_code(argv[1]);
-    printf("FIRST CHAR: %c\n", data_segment[0]);
+    printf("FIRST CHAR: %c\n", data_segment[9]);
     printf("LABEL AT:  %d\n", label_addresses[0]);
 /*
     instruction instr;
@@ -243,30 +244,47 @@ void load_data(char* token){
 */
 void load_text(char* token, int *index){
     char *instr = strtok(token, " \t");
-    mem_word op_code = get_opCode(instr);;
+    int op_code = get_opCode(instr);
     instruction new_instruction;
-    mem_addr address - TEXT_START + *index;
+    mem_addr address = TEXT_START + *index;
+    int label_index = 0;
     
-    if((op_code == 0) || (op_code == 3) || (op_code == 4) || (op_code = 8)){
+    if((op_code == 0) || (op_code == 3) || (op_code == 4) || (op_code == 8)){
         struct instr_type1 instruction;
         instruction.op_code = op_code;
-        strtok(NULL, ", ");
-        istruction.r_dest = (mem_word) strtol(instr + 1, (char **)NULL, 10);
-        strtok(NULL, ", ");
-        istruction.r_src = (mem_word) strtol(instr + 1, (char **)NULL, 10);
-        strtok(NULL, ", ");
-        istruction._label = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        instr = strtok(NULL, ", ");
+        instruction.r_dest = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        instr = strtok(NULL, ", ");
+        instruction.r_src = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        instr = strtok(NULL, ", ");
+        if((op_code == 3) || (op_code == 4)){
+            label_index = find_label(instr);
+            instruction.label = (mem_word) (*index - label_index);
+            printf("OFFSET: %d, LABEL_INDEX: %d\n", instruction.label, label_index);
+        }
+        instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
         new_instruction = type1_create(instruction);
         write_instr(address, new_instruction);
         *index += 1;
     }
+
     if((op_code == 2) || (op_code == 5) || (op_code == 7)){
         struct instr_type2 instruction;
         instruction.op_code = op_code;
-        strtok(NULL, ", ");
-        istruction.target = (mem_word) strtol(instr + 1, (char **)NULL, 10);
-        strtok(NULL, ", ");
-        istruction._label = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        instr = strtok(NULL, ", ");
+        instruction.r_target = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        instr = strtok(NULL, ", ");
+        if(op_code == 2){
+            label_index = find_label(instr);
+            instruction.label = (mem_word) (*index - label_index);
+            printf("OFFSET: %d, LABEL_INDEX: %d\n", instruction.label, label_index);
+        }
+        if(op_code == 5){
+            instruction.label = (((mem_word) strtol(instr, (char **)NULL, 16)) - DATA_START);
+            printf("Hi: %d\n", instruction.label);
+        }
+        instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
+        printf("Hi: %d\n", instruction.label);
         new_instruction = type2_create(instruction);
         write_instr(address, new_instruction);
         *index += 1;
@@ -274,20 +292,20 @@ void load_text(char* token, int *index){
     if(op_code == 1){
         struct instr_type3 instruction;
         instruction.op_code = op_code;
-        strtok(NULL, ", ");
-        istruction._label = (mem_word) strtol(instr + 1, (char **)NULL, 10);
-        new_instruction = type2_create(instruction);
+        instr = strtok(NULL, ", ");
+        instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
+        new_instruction = type3_create(instruction);
         write_instr(address, new_instruction);
         *index += 1;
     }
-    while(instr != NULL){
+/*    while(instr != NULL){
         op_code = get_opCode(instr);
         mem_addr address = TEXT_START + *index;
         write_instr(address, op_code);
         *index += 1;
         instr = strtok(NULL, " \t");
     }
-
+*/
 }
 /* TYPE 1 instruction encoding: 4 bit OP code, 5 bit Rdest, 5 bit Rsrc, 18 bit Label */
 
@@ -296,7 +314,7 @@ instruction type1_create(struct instr_type1 instr){
     new_instruction = (instr.op_code << 28) | new_instruction;
     new_instruction = (instr.r_dest << 23) | new_instruction;
     new_instruction = (instr.r_src << 17) | new_instruction;
-    new_instruction = (instr._label & 0x0003ffff) | new_instruction;
+    new_instruction = (instr.label & 0x0003ffff) | new_instruction;
     return new_instruction;
 
 }
@@ -304,7 +322,7 @@ instruction type1_create(struct instr_type1 instr){
 instruction type2_create(struct instr_type2 instr){
     instruction new_instruction = 0;
     new_instruction = (instr.op_code << 28) | new_instruction;
-    new_instruction = (instr.r_src << 23) | new_instruction;
+    new_instruction = (instr.r_target << 23) | new_instruction;
     new_instruction = (instr.label & 0x007FFFFF) | new_instruction;
     return new_instruction;
 }
@@ -321,7 +339,7 @@ instruction type3_create(struct instr_type3 instr){
   Params: *instr - instruction that was parsed from source file
   Returns: instruction - opcode number or address for an instruction
 */
-instruction get_opCode(char *instr){
+int get_opCode(char *instr){
     if(strcmp(instr, "ADDI") == 0) return 0;
     else if (strcmp(instr, "B") == 0) return 1;
     else if (strcmp(instr, "BEQZ") == 0) return 2;
@@ -332,9 +350,17 @@ instruction get_opCode(char *instr){
     else if (strcmp(instr, "LI") == 0) return 7;
     else if (strcmp(instr, "SUBI") == 0) return 8;
     else if (strcmp(instr, "SYSCALL") == 0) return 9;
-    else return (instruction) strtol(instr, (char **)NULL, 16);
+    else return -1;
 }
 
+int find_label(char* to_search){
+    int i; 
+    for(i = 0; i < last_label; i++){
+        if(strcmp(to_search, labels[i]) == 0);
+        return label_addresses[i];
+    }
+    return -1;
+}
 
 /* For each of the reads and writes we first check to see if the address
     is less than its address top boundary and then the bottom.*/
