@@ -8,7 +8,7 @@
 
 int main(){
 
-    char test[] = "LB $30, 100($23)";
+    char test[] = "LB $30, ($23)";
     char reg[3];
     int reg_index;
     char *token = NULL;

@@ -44,7 +44,10 @@ char labels[NUM_LABELS][LABEL_SIZE];
 int label_addresses[NUM_LABELS];
 int last_label = 0;
 int last_string = 0;
-char strings[NUM_STRINGS][STRING_SIZE];
+int top_string_mem = 1500;
+char string_allocation[NUM_STRINGS][STRING_SIZE];
+int string_addresses[NUM_STRINGS];
+int string_lengths[NUM_STRINGS];
 mem_word REGISTER_FILE[NUM_REGISTERS];
 
 struct instr_type1{
@@ -61,6 +64,13 @@ struct instr_type2{
 struct instr_type3{
     mem_word op_code;
     mem_word label;
+};
+
+struct instruction_container{
+    struct instr_type1 type1;
+    struct instr_type2 type2;
+    struct instr_type3 type3;
+    int type;
 };
 
 
@@ -80,42 +90,43 @@ instruction type1_create(struct instr_type1 instr);
 instruction type2_create(struct instr_type2 instr);
 instruction type3_create(struct instr_type3 instr);
 int find_label(char* to_search);
+struct instruction_container decode(int to_decode);
+int alu(struct instruction_container instr, op_code);
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
 
+    struct instruction_container instruc;
     make_memory();
     parse_source_code(argv[1]);
-    printf("FIRST CHAR: %c\n", data_segment[9]);
-    printf("LABEL AT:  %d\n", label_addresses[0]);
-/*
     instruction instr;
     int usermode = 1;
-    mem_word to_load = 0;
-    mem_addr to_store = 0;
-    mem_addr to_add = 0;
-    mem_addr to_mult = 0;
+    int computes;
     mem_addr pc = TEXT_START;
-    mem_addr to_print;
+    int type;
+    int op_code;
 
     while(usermode){
         instr = read_inst(pc);
+        instruc = decode(instr);
+        type = instruc.type;
+        if(type == 1) op_code = instruc.type1.op_code;
+        if(type == 2) op_code = instruc.type2.op_code;
+        if(type == 3) op_code = instruc.type3.op_code;
         pc += 1;
-        switch(instr){
+        switch(op_code){
             case 0:
-                to_load = (mem_word) read_inst(pc);
-                accumulator = read_mem(to_load);
-                pc += 1;
+                alu(instruc, instruc.type1.op_code);
                 break;
             case 1:
-                to_store = (mem_addr) read_inst(pc);
-                write_mem(to_store, accumulator);
+                pc = DATA_START + instruc.type3.label;
                 pc += 1;
                 break;
             case 2:
-                to_add = (mem_addr) read_inst(pc);
-                add(&accumulator, to_add);
-                pc +=1;
+                if(alu(instruc, instruc.type1.op_code) == 0){
+                    pc = DATA_START + instruc.type2.label;
+                    pc += 1;
+                }
                 break;
             case 3:
                 to_mult = (mem_addr) read_inst(pc);
@@ -134,9 +145,24 @@ int main(int argc, char *argv[]){
                 printf("%s", strings[to_print]);
                 pc += 1;
                 break;
+            case 6:
+                usermode = 0;
+                printf("%d\n", accumulator);
+                break;
+            case 7:
+                usermode = 0;
+                printf("%d\n", accumulator);
+                break;
+            case 8:
+                usermode = 0;
+                printf("%d\n", accumulator);
+                break;
+            case 9:
+                usermode = 0;
+                printf("%d\n", accumulator);
+                break;
         }
     }
-*/
     free(data_segment);
     free(kernal_segment);
     free(text_segment);
@@ -230,6 +256,16 @@ void load_data(char* token){
       label_addresses[last_label] = ((mem_addr) strtol(address, (char **)NULL, 16)) - DATA_START;
       last_label += 1;
     }
+    else if(strcmp(address, ".space") == 0){
+      value = strtok(NULL, " \t");
+      strcpy(string_allocation[last_string], value);
+      address = strtok(NULL, " \t");
+      mem_word length_of_string = (mem_word) strtol(address, (char **)NULL, 10);
+      string_lengths[last_string] = length_of_string;
+      string_addresses[last_string] = top_string_mem;
+      last_string += 1;
+      top_string_mem += length_of_string;
+    }
     else{
       value = strtok(NULL, " \t");
       addr = (mem_addr) strtol(address, (char **)NULL, 16);
@@ -291,7 +327,7 @@ void load_text(char* token, int *index){
         instruction.op_code = op_code;
         instr = strtok(NULL, " \t");
         label_index = find_label(instr);
-        instruction.label = (mem_word) (*index - label_index);
+        instruction.label = (mem_word) label_index;
         new_instruction = type3_create(instruction);
         write_instr(address, new_instruction);
         *index += 1;
@@ -323,8 +359,8 @@ instruction type1_create(struct instr_type1 instr){
     instruction new_instruction = 0;
     new_instruction = (instr.op_code << 28) | new_instruction;
     new_instruction = (instr.r_dest << 23) | new_instruction;
-    new_instruction = (instr.r_src << 17) | new_instruction;
-    new_instruction = (instr.label & 0x0003ffff) | new_instruction;
+    new_instruction = (instr.r_src << 18) | new_instruction;
+    new_instruction = (instr.label & 0x001fffff) | new_instruction;
     return new_instruction;
 
 }
@@ -333,7 +369,7 @@ instruction type2_create(struct instr_type2 instr){
     instruction new_instruction = 0;
     new_instruction = (instr.op_code << 28) | new_instruction;
     new_instruction = (instr.r_target << 23) | new_instruction;
-    new_instruction = (instr.label & 0x007FFFFF) | new_instruction;
+    new_instruction = (instr.label & 0x007fffff) | new_instruction;
     return new_instruction;
 }
 
@@ -341,6 +377,7 @@ instruction type2_create(struct instr_type2 instr){
 instruction type3_create(struct instr_type3 instr){
     instruction new_instruction = 0;
     new_instruction = (instr.op_code << 28) | new_instruction;
+    printf("offset: %d", instr.label);
     new_instruction = (instr.label & 0x0FFFFFFF) | new_instruction;
     return new_instruction;
 }
@@ -447,4 +484,49 @@ void mult(mem_word* accum, mem_addr operand){
 
     mem_word product = read_mem(operand);
     *accum = product * (*accum);
+}
+struct instruction_container decode(int to_decode){
+    struct instruction_container instruction;
+    mem_word op_code = (to_decode >> 28);
+    mem_word dest;
+    mem_word src;
+    mem_word label;
+
+    if((op_code == 0) || (op_code == 3) 
+            || (op_code == 4) || (op_code == 6) || (op_code == 8)){
+        instruction.type1.op_code = op_code;
+        dest = (to_decode >> 23) & 0x0000001f;
+        instruction.type1.r_dest = dest;
+        src =  (to_decode >> 18) & 0x0000001f;
+        instruction.type1.r_src = src;
+        instruction.type1.label = (to_decode & 0x0003ffff);
+        instruction.type = 1;
+    }
+    else if((op_code == 2) || (op_code ==5) || (op_code == 7)){
+        instruction.type2.op_code = op_code;
+        dest = (to_decode >> 23) & 0x0000001f;
+        instruction.type2.r_target = dest;
+        instruction.type2.label = (to_decode & 0x0007ffff);
+        instruction,type = 2;
+    }
+    else if(op_code == 1){
+        instruction.type3.op_code = op_code;
+        instruction.type3.label = (mem_word) (to_decode & 0x0fffffff);
+        instruction.type = 3;
+    }
+    return instruction;
+}
+
+int alu(struct instruction_container instr, op_code){
+    if(op_code == 1){
+        REGISTER_FILE[instr.type1.r_dest] = REGISTER_FILE[instr.type1.r_src]
+                                + instr.type1.label;
+    return 0;
+    }
+    if(op_code == 2){
+        if(REGISTER_FILE[instr.type2.r_target] == 0){
+            return 2;
+        }
+        else return -1;
+    }
 }
