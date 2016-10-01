@@ -32,7 +32,7 @@ typedef int32_t instruction;
 #define KERNAL_TOP (((mem_word) (0x70000000)) -1)
 #define NUM_REGISTERS 32
 #define NUM_LABELS 50
-#define LABEL_SIZE 15
+#define LABEL_SIZE 50
 
 /*Global Variables:  */
 instruction* text_segment;
@@ -51,7 +51,7 @@ int string_lengths[NUM_STRINGS];
 mem_word REGISTER_FILE[NUM_REGISTERS];
 
 struct instr_type1{
-    mem_word op_code;
+    unsigned int op_code;
     mem_word r_dest;
     mem_word r_src;
     mem_word label;
@@ -62,7 +62,7 @@ struct instr_type2{
     mem_word label;
 };
 struct instr_type3{
-    mem_word op_code;
+    unsigned int op_code;
     mem_word label;
 };
 
@@ -94,11 +94,13 @@ struct instruction_container decode(int to_decode);
 int alu(struct instruction_container instr, int op_code);
 int check_allocated(char* match);
 int syscall(mem_word function);
+int get_index(int match);
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
 
     struct instruction_container instruc;
+    int call = 0;
     make_memory();
     parse_source_code(argv[1]);
     instruction instr;
@@ -106,7 +108,9 @@ int main(int argc, char *argv[]){
     int computes;
     mem_addr pc = TEXT_START;
     int type;
-    int op_code;
+    float C = 0;
+    float IC = 0;
+    unsigned int op_code;
 
     while(usermode){
         instr = read_inst(pc);
@@ -116,51 +120,66 @@ int main(int argc, char *argv[]){
         if(type == 2) op_code = instruc.type2.op_code;
         if(type == 3) op_code = instruc.type3.op_code;
         pc += 1;
-        switch(op_code){
+        switch((unsigned int)op_code){
             case 0:
                 alu(instruc, instruc.type1.op_code);
+                C += 6;
                 break;
             case 1:
-                pc = DATA_START + instruc.type3.label;
+                pc = TEXT_START + instruc.type3.label;
                 pc += 1;
+                C += 4;
                 break;
             case 2:
-                if(alu(instruc, instruc.type1.op_code) == 0){
-                    pc = DATA_START + instruc.type2.label;
+                if(alu(instruc, instruc.type2.op_code) == 2){
+                    pc = TEXT_START + instruc.type2.label;
                     pc += 1;
+                    C += 5;
                 }
                 break;
             case 3:
                 if(alu(instruc, instruc.type1.op_code) == 3){
-                    pc = DATA_START + instruc.type1.label;
+                    pc = TEXT_START + instruc.type1.label;
                     pc += 1;
+                    C += 5;
                 }
                 break;
             case 4:
                 if(alu(instruc, instruc.type1.op_code) == 4){
-                    pc = DATA_START + instruc.type1.label;
+                    pc = TEXT_START + instruc.type1.label;
                     pc += 1;
+                    C += 5;
                 }
                 break;
             case 5:
                 REGISTER_FILE[instruc.type2.r_target] = DATA_START + instruc.type2.label;
+                C += 5;
                 break;
             case 6:
                 REGISTER_FILE[instruc.type1.r_dest] = 
-                            read_mem(REGISTER_FILE[instruc.type1.r_src] 
-                            + instruc.type1.label);
+                            read_mem((REGISTER_FILE[instruc.type1.r_src] 
+                            + instruc.type1.label));
+                C += 6;
                 break;
             case 7:
                 REGISTER_FILE[instruc.type2.r_target] = instruc.type2.label;
+                C += 3;
                 break;
             case 8:
                 alu(instruc, instruc.type1.op_code);
+                C += 6;
                 break;
             case 9:
+                if(instruc.type3.label == 9){
+                usermode = 0; 
+                }
+                C += 8;
                 syscall(instruc.type3.label);
                 break;
         }
+        IC += 1;
     }
+    printf("IC = %f\n C = %f\n Ratio = %f\n", IC, C, (8*IC)/C);
     free(data_segment);
     free(kernal_segment);
     free(text_segment);
@@ -173,7 +192,7 @@ int main(int argc, char *argv[]){
 */
 void make_memory(){
 
-    data_segment = malloc(MAX_SEG_SIZE);
+    data_segment = calloc(MAX_SEG_SIZE, 1);
     if(data_segment == NULL)
         exit(1);
     kernal_segment = malloc(MAX_SEG_SIZE);
@@ -244,14 +263,13 @@ void load_data(char* token){
         address = strtok(NULL, " \t");
         addr = (mem_addr) strtol(address, (char **)NULL, 16);
         value = strtok(NULL, "\"") ;
-        printf("String: %s, Address: %s\n", value, address);
         write_mem(addr, value);
     }
     else if(strcmp(address, ".label") == 0){
       label = strtok(NULL, " \t");
       strcpy(labels[last_label], label);
       address = strtok(NULL, " \t");
-      label_addresses[last_label] = ((mem_addr) strtol(address, (char **)NULL, 16)) - DATA_START;
+      label_addresses[last_label] = ((mem_addr) strtol(address, (char **)NULL, 16)) - TEXT_START;
       last_label += 1;
     }
     else if(strcmp(address, ".space") == 0){
@@ -278,13 +296,13 @@ void load_data(char* token){
 */
 void load_text(char* token, int *index){
     char *instr = strtok(token, " \t");
-    int op_code = get_opCode(instr);
-    int *allocated:
+    unsigned int op_code = get_opCode(instr);
+    int allocated;
     instruction new_instruction;
     mem_addr address = TEXT_START + *index;
     int label_index = 0;
     
-    if((op_code == 0) || (op_code == 3) || (op_code == 4) || (op_code == 8)){
+    if((op_code == 0) || (op_code == 3) || (op_code == 4) || ((unsigned int)op_code == 8)){
         struct instr_type1 instruction;
         instruction.op_code = op_code;
         instr = strtok(NULL, ", ");
@@ -294,9 +312,11 @@ void load_text(char* token, int *index){
         instr = strtok(NULL, ", ");
         if((op_code == 3) || (op_code == 4)){
             label_index = find_label(instr);
-            instruction.label = (mem_word) (*index - label_index);
+            instruction.label = label_index;
         }
-        instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
+        else{
+            instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
+        }
         new_instruction = type1_create(instruction);
         write_instr(address, new_instruction);
         *index += 1;
@@ -309,24 +329,27 @@ void load_text(char* token, int *index){
         instruction.r_target = (mem_word) strtol(instr + 1, (char **)NULL, 10);
         instr = strtok(NULL, ", ");
         if(op_code == 2){
+            printf("Branching: %s\n", instr);
             label_index = find_label(instr);
-            instruction.label = (mem_word) (*index - label_index);
+            printf("Branching: %d\n", label_index);
+            instruction.label = (mem_word) label_index;
         }
-        if(op_code == 5){
-            allocated = check_allocation(instr);
+        else if(op_code == 5){
+            allocated = check_allocated(instr);
             if(allocated != -1){
-                instruction.label = string_address[allocated];
+                instruction.label = string_addresses[allocated];
             }
             else{
             instruction.label = (((mem_word) strtol(instr, (char **)NULL, 16)) - DATA_START);
             }
         }
-        instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
+        else {
+            instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
+        }
         new_instruction = type2_create(instruction);
         write_instr(address, new_instruction);
         *index += 1;
-    }
-
+        }   
     if(op_code == 1){
         struct instr_type3 instruction;
         instruction.op_code = op_code;
@@ -338,7 +361,7 @@ void load_text(char* token, int *index){
         *index += 1;
     }
 
-    if(op_code == 9){
+    if((unsigned int)op_code == 9){
         struct instr_type3 instruction;
         instruction.op_code = op_code;
         instr = strtok(NULL, " \t");
@@ -365,6 +388,7 @@ void load_text(char* token, int *index){
         instruction.label = (mem_word) strtol(offset, (char **)NULL, 10);
         new_instruction = type1_create(instruction);
         write_instr(address, new_instruction);
+        *index += 1;
     }
 
 }
@@ -392,8 +416,7 @@ instruction type2_create(struct instr_type2 instr){
 instruction type3_create(struct instr_type3 instr){
     instruction new_instruction = 0;
     new_instruction = (instr.op_code << 28) | new_instruction;
-    printf("offset: %d", instr.label);
-    new_instruction = (instr.label & 0x0FFFFFFF) | new_instruction;
+    new_instruction = (instr.label & 0x0fffffff) | new_instruction;
     return new_instruction;
 }
 
@@ -414,12 +437,12 @@ int get_opCode(char *instr){
     else if (strcmp(instr, "SYSCALL") == 0) return 9;
     else return -1;
 }
-
 int find_label(char* to_search){
     int i; 
     for(i = 0; i < last_label; i++){
-        if(strcmp(to_search, labels[i]) == 0);
-        return label_addresses[i];
+        if(strcmp(to_search, labels[i]) == 0){
+            return label_addresses[i];
+        }
     }
     return -1;
 }
@@ -434,7 +457,7 @@ char read_mem(mem_addr address){
     if((address <  DATA_TOP) && (address >= DATA_START))
         return data_segment[(address - DATA_START)];
     else{
-        printf("We couldn't access that address check addresses avaliable\n");
+        printf("Read memory fail:\n");
         return NULL;
     }
 }
@@ -448,7 +471,7 @@ instruction read_inst(mem_addr address){
         return text_segment[(address - TEXT_START)];
 }
     else{
-        printf("We couldn't access that address check addresses avaliable\n");
+        printf("Read instruction fail:");
         return NULL;
     }
 }
@@ -462,7 +485,7 @@ void write_instr(mem_addr address, instruction instr){
     if((address <  TEXT_TOP) && (address >= TEXT_START))
         text_segment[(address - TEXT_START)] = instr;
     else{
-        printf("We couldn't access that address check address avaliable\n");
+        printf("Write instruction fail:");
         return NULL;
     }
 }
@@ -475,40 +498,20 @@ void write_mem(mem_addr address, char *value){
     if((address < DATA_TOP) && (address >= DATA_START))
         memcpy(data_segment + (address - DATA_START), value, strlen(value));
     else{
-        printf("We couldn't access that address check addresses avaliable\n");
+        printf("Write memowry fail:");
         return NULL;
     }
 }
 
-/*Description: Adds value that is in the accumulator and a value from
-                a memory location.
-      Params: *accum- pointer to the accumulator, addr of the operand to add
-      Returns: void
-*/
-void add(mem_word* accum, mem_addr operand){
-    mem_word quotient = read_mem(operand);
-    *accum = quotient + *accum;
-}
-
-/*Description: Multiplies value that is in the accumulator and a value from
-                a memory location.
-      Params: *accum- pointer to the accumulator, addr of the operand to multiply
-      Returns: void
-*/
-void mult(mem_word* accum, mem_addr operand){
-
-    mem_word product = read_mem(operand);
-    *accum = product * (*accum);
-}
-struct instruction_container decode(int to_decode){
+struct instruction_container decode(instruction to_decode){
     struct instruction_container instruction;
-    mem_word op_code = (to_decode >> 28);
+    unsigned int op_code = (to_decode >> 28) & 0x0000000f;
     mem_word dest;
     mem_word src;
     mem_word label;
 
     if((op_code == 0) || (op_code == 3) 
-            || (op_code == 4) || (op_code == 6) || (op_code == 8)){
+            || (op_code == 4) || (op_code == 6) || ((unsigned int)op_code == 8)){
         instruction.type1.op_code = op_code;
         dest = (to_decode >> 23) & 0x0000001f;
         instruction.type1.r_dest = dest;
@@ -524,8 +527,8 @@ struct instruction_container decode(int to_decode){
         instruction.type2.label = (to_decode & 0x0007ffff);
         instruction.type = 2;
     }
-    else if(op_code == 1){
-        instruction.type3.op_code = op_code;
+    else if((op_code == 1) || (op_code == 9)){
+        instruction.type3.op_code = (mem_word) op_code;
         instruction.type3.label = (mem_word) (to_decode & 0x0fffffff);
         instruction.type = 3;
     }
@@ -533,7 +536,7 @@ struct instruction_container decode(int to_decode){
 }
 
 int alu(struct instruction_container instr, int op_code){
-    if(op_code == 1){
+    if(op_code == 0){
         REGISTER_FILE[instr.type1.r_dest] = REGISTER_FILE[instr.type1.r_src]
                                 + instr.type1.label;
         return 0;
@@ -565,24 +568,36 @@ int alu(struct instruction_container instr, int op_code){
                                 - instr.type1.label;
         return 0;
     }
+    if(op_code == 8){
+        REGISTER_FILE[instr.type1.r_dest] = REGISTER_FILE[instr.type1.r_src]
+                                - instr.type1.label;
+        return 0;
+    }
     return -1;
     
 }
 
 int syscall(mem_word function){
+    
     if(function == 0){
-                
-
+        int index  = get_index((REGISTER_FILE[0] - DATA_START));
+        char buff[string_lengths[index]];     
+        scanf("%s", buff);
+        memcpy((data_segment + string_addresses[index]), buff, strlen(buff)+ 1);
+        data_segment[strlen(buff)] = '\0';
     }
     if(function == 1){
-
-
+        int index  = (REGISTER_FILE[0] - DATA_START);
+        printf("%s\n", data_segment + index);
     }
-
+    return 0;
+    if(function == 9){
+        return 9;
+    }
+    
 }
 int check_allocated(char* match){
     int i;
-    
     for(i = 0; i < last_string; i++){
         if(strcmp(string_allocation[i], match) == 0){
             return i;
@@ -590,4 +605,14 @@ int check_allocated(char* match){
     }
 
     return -1;
+}
+int get_index(int match){
+    int i;
+    for(i = 0; i < last_string; i++){
+        if(string_addresses[i] == match){
+        return i;
+        }
+    }
+    return -1;
+
 }
