@@ -1,0 +1,14 @@
+INPUT: hiih
+IC = 42.0
+C = 190.0
+Ratio = 1.768
+
+INPUT: a
+IC = 16.0
+C =  86.0
+Ratio = 1.488
+
+INPUT: tacocat
+IC = 61.0
+C = 266.0
+Ratio = 1.834
