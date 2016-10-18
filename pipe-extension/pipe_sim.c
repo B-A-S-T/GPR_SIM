@@ -84,9 +84,12 @@ struct if_id{
 };
 
 struct id_exe{
+    unsigned int op_code;
     // which type of instruction
-    struct instruction_container;
+    struct instruction_container instruction;
     //values in registers
+    int label;
+    int new_pc;
     int op_a;
     int op_b; 
 };
@@ -95,6 +98,7 @@ struct exe_mem{
     unsigned int op_code; 
     mem_word ALU_out; // output
     int op_B; //used for store word
+    mem_word r_dest;
 };
 
 struct mem_wb {
@@ -118,12 +122,12 @@ instruction type1_create(struct instr_type1 instr);
 instruction type2_create(struct instr_type2 instr);
 instruction type3_create(struct instr_type3 instr);
 int find_label(char* to_search);
-int alu(struct instruction_container instr, int op_code);
+int alu(int op_a, int op_b, int op_code);
 int check_allocated(char* match);
 int syscall(mem_word function);
 int get_index(int match);
-struct if_id _if(mem_addr address);
-struct id_exe _id(struct if_id to_decode);
+struct if_id _if(mem_addr *address);
+struct id_exe _id(struct if_id to_decode, mem_addr *pc);
 struct exe_mem _exe(struct id_exe to_execute);
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
@@ -150,22 +154,20 @@ int main(int argc, char *argv[]){
     float C = 0;
     float IC = 0;
     unsigned int op_code;
-/*
     if_id_old = if_id_new;
-    if_id_new = _ir(pc);
-
+    if_id_new = _if(&pc);
     id_exe_old = id_exe_new;
-    id_exe_new = _id(if_id_old);
+    id_exe_new = _id(if_id_new, &pc);
 
     exe_mem_old = exe_mem_new;
-    exe_mem_new = _exe(id_exe_old);
-    
+    exe_mem_new = _exe(id_exe_new);
+/*    
     mem_wb_old = mem_wb_new;
     mem_wb_new = _mem(exe_mem_old);
     
     _wb(mem_wb_old);
 */
-
+/*
     while(usermode){
         instr = read_inst(pc);
         instruc = decode(instr);
@@ -238,6 +240,7 @@ int main(int argc, char *argv[]){
     }
     // Calculation
     printf("IC = %f\n C = %f\n Ratio = %f\n", IC, C, (8*IC)/C);
+*/
     free(data_segment);
     free(kernal_segment);
     free(text_segment);
@@ -362,8 +365,13 @@ void load_text(char* token, int *index){
     instruction new_instruction;
     mem_addr address = TEXT_START + *index;
     int label_index = 0;
+    //Nop
+    if(op_code == 10){
+        write_instr(address,0);
+        *index += 1;
+    }
     // Type 1 Instructions
-    if((op_code == 0) || (op_code == 3) || (op_code == 4) || ((unsigned int)op_code == 8)){
+    if((op_code == 0) || (op_code == 3) || (op_code == 4) || ((unsigned int)op_code == 8) || ((unsigned int)op_code == 11)){
         struct instr_type1 instruction;
         instruction.op_code = op_code;
         instr = strtok(NULL, ", ");
@@ -375,6 +383,9 @@ void load_text(char* token, int *index){
         if((op_code == 3) || (op_code == 4)){
             label_index = find_label(instr);
             instruction.label = label_index;
+        }
+        if((unsigned int)op_code == 11){
+        instruction.label = (mem_word) strtol(instr + 1, (char **)NULL, 10);
         }
         else{
             instruction.label = (mem_word) strtol(instr, (char **)NULL, 10);
@@ -515,6 +526,7 @@ int get_opCode(char *instr){
     else if (strcmp(instr, "SUBI") == 0) return 8;
     else if (strcmp(instr, "SYSCALL") == 0) return 9;
     else if (strcmp(instr, "NOP") == 0) return 10;
+    else if (strcmp(instr, "ADD") == 0) return 11;
     else return -1;
 }
 
@@ -552,16 +564,13 @@ char read_mem(mem_addr address){
       Params: address - address to read from
       Returns: insrtuction - returns the contents
 */
-struct if_id _if(mem_addr address){
+struct if_id _if(mem_addr *address){
     struct if_id fetched;
-    if((address <  TEXT_TOP) && (address >= TEXT_START)){
-        fetched.instr = text_segment[(address - TEXT_START)];
+    if((*address <  TEXT_TOP) && (*address >= TEXT_START)){
+        fetched.instr = text_segment[(*address - TEXT_START)];
+        *address += 1;
         return fetched;
 }
-    else{
-        printf("Read instruction fail:");
-        return NULL;
-    }
 }
 
 /*Description: Writes memory to the text_segment.
@@ -596,82 +605,192 @@ void write_mem(mem_addr address, char *value){
   Returns: struct instruction_container - container with the correct
   		   instruction inside.
 */
-struct id_if _id(struct if_id to_decode){
+struct id_exe _id(struct if_id to_decode, mem_addr *pc){
     struct instruction_container instruction;
-    unsigned int op_code = (to_decode >> 28) & 0x0000000f;
+    struct id_exe decoded;
+    unsigned int op_code = (to_decode.instr >> 28) & 0x0000000f;
     mem_word dest;
     mem_word src;
     mem_word label;
     // Type 1
     if((op_code == 0) || (op_code == 3) 
-            || (op_code == 4) || (op_code == 6) || ((unsigned int)op_code == 8)){
+            || (op_code == 4) || (op_code == 6) || ((unsigned int)op_code == 8) || ((unsigned int) op_code == 11)){
         instruction.type1.op_code = op_code;
-        dest = (to_decode >> 23) & 0x0000001f;
+        dest = (to_decode.instr >> 23) & 0x0000001f;
         instruction.type1.r_dest = dest;
-        src =  (to_decode >> 18) & 0x0000001f;
+        src =  (to_decode.instr >> 18) & 0x0000001f;
         instruction.type1.r_src = src;
-        instruction.type1.label = (to_decode & 0x0003ffff);
+        instruction.type1.label = (to_decode.instr & 0x0003ffff);
         instruction.type = 1;
+        decoded.instruction = instruction;
+        // ADD needs the values in two registers
+        if((unsigned int) op_code == 11){
+            printf("Reg1: %d   Reg2: %d\n", instruction.type1.r_src, instruction.type1.label);
+            decoded.op_a = REGISTER_FILE[instruction.type1.r_src];
+            decoded.op_b = REGISTER_FILE[instruction.type1.label];
+        }
+        // BGE and BNE need values out of two registers
+        else if((op_code == 3) || (op_code == 4)){
+            decoded.op_a = REGISTER_FILE[instruction.type1.r_dest];
+            decoded.op_b = REGISTER_FILE[instruction.type1.r_src];
+        }
+        // all other just need one register value and a label/immediate
+        // ADDI:0----LB:6----SUBI:8
+        else{
+            decoded.op_a = REGISTER_FILE[instruction.type1.r_src];
+            decoded.op_b = instruction.type1.label;
+        }
+        return decoded;
     }
     // Type 2
     else if((op_code == 2) || (op_code ==5) || (op_code == 7)){
         instruction.type2.op_code = op_code;
-        dest = (to_decode >> 23) & 0x0000001f;
+        dest = (to_decode.instr >> 23) & 0x0000001f;
         instruction.type2.r_target = dest;
-        instruction.type2.label = (to_decode & 0x0007ffff);
+        instruction.type2.label = (to_decode.instr & 0x0007ffff);
         instruction.type = 2;
+        decoded.instruction = instruction;
+        // BEQZ needs the value out of one register
+        if(op_code == 2){
+            decoded.op_a = REGISTER_FILE[instruction.type2.r_target];
+        }
     }
     // Type3
     else if((op_code == 1) || (op_code == 9)){
         instruction.type3.op_code = (mem_word) op_code;
-        instruction.type3.label = (mem_word) (to_decode & 0x0fffffff);
+        instruction.type3.label = (mem_word) (to_decode.instr & 0x0fffffff);
         instruction.type = 3;
+        decoded.instruction = instruction;
+        //Branch label or System call 
+        decoded.op_a = instruction.type3.label;
     }
-    return instruction;
+    //NOP
+    else if((unsigned int) op_code == 10){
+        instruction.type3.op_code == (mem_word) op_code;
+        instruction.type = 3;
+        decoded.instruction = instruction;
+    }
+    /*
+        Branches will start here.
+        We have to update branches in the Decode stage.
+    */
+    // Unconditional Branch
+    else if(op_code == 1){
+        *pc = TEXT_START + decoded.op_a;
+        *pc += 1;
+    }
+    // Other Types of Branches
+    else if((op_code == 2) || (op_code == 3) || (op_code == 4)){
+        // BEQZ is a type 2 so we have to keep separate
+        if(op_code == 2){
+            // Only requires one operand
+            if(alu(decoded.op_a, 0, instruction.type2.op_code) == 2){
+                *pc = TEXT_START + instruction.type2.label;
+                *pc += 1;
+            }
+        }
+        // BGE and BNE are both type 1 instructions
+        if((op_code == 3) || (op_code == 4)){
+            if((alu(decoded.op_a, decoded.op_b, instruction.type1.op_code) == 3) ||
+                                 (alu(decoded.op_a, decoded.op_b, instruction.type1.op_code == 4))){
+                *pc = TEXT_START + instruction.type1.label;
+                *pc += 1;
+            }
+        }
+    }
+    // Return the id_exe latch
+    return decoded;
+}
+
+struct exe_mem _exe(struct id_exe to_execute){
+        unsigned int op_code;
+        struct exe_mem exe_latch;
+        int type = to_execute.instruction.type;
+        if(type == 1) op_code = to_execute.instruction.type1.op_code;
+        if(type == 2) op_code = to_execute.instruction.type2.op_code;
+        if(type == 3) op_code = to_execute.instruction.type3.op_code;
+        exe_latch.op_code = op_code;
+        printf("Op_code: %lu\n", exe_latch.op_code);
+        switch((unsigned int)op_code){
+            case 0: // ADDI
+                exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, exe_latch.op_code);
+                //Destination foward
+                exe_latch.r_dest = to_execute.instruction.type1.r_dest;
+                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
+                break;
+            case 5: // LA
+                // Destination
+                exe_latch.r_dest = to_execute.instruction.type2.r_target;
+                //Offset
+                exe_latch.ALU_out = to_execute.instruction.type2.label + DATA_START;
+                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
+                break;
+            case 6: // LB
+                // Offset for target memory address
+                exe_latch.ALU_out = to_execute.op_a + to_execute.op_b;
+                // Destionation register
+                exe_latch.r_dest = to_execute.instruction.type1.r_dest;
+                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
+                break;
+            case 7: // LI
+                exe_latch.ALU_out = to_execute.instruction.type2.label;
+                exe_latch.r_dest = to_execute.instruction.type2.r_target;
+                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
+                break;
+            case 8: // SUBI
+                printf("OP_B: %d\n", to_execute.op_b);
+                exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, exe_latch.op_code);
+                //Destination foward
+                exe_latch.r_dest = to_execute.instruction.type1.r_dest;
+                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
+                break;
+            case 9: // SYSCALL
+                printf("SYSCALL NUM: %d\n", to_execute.op_a);
+                //syscall(to_execute.op_a);
+                break;
+            case 11:
+                exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, 0);
+                exe_latch.r_dest = to_execute.instruction.type1.r_dest;
+                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
+                break;
+        }
 }
 
 /*Description: Does standard alu calculations.
   Params: struct instruction_container - instruction, int op_code - alu function code
   Returns: returns the value of op code if correctly completes.
 */
-int alu(struct instruction_container instr, int op_code){
-	// Add
+int alu(int op_a, int op_b, int op_code){
+	// Addi
     if(op_code == 0){
-        REGISTER_FILE[instr.type1.r_dest] = REGISTER_FILE[instr.type1.r_src]
-                                + instr.type1.label;
-        return 0;
+        printf("Op a: %d, Op b: %d\n", op_a, op_b);
+        return (op_a + op_b);
     }
     // Check if equals 0
     if(op_code == 2){
-        if(REGISTER_FILE[instr.type2.r_target] == 0){
+        if(op_a == 0){
             return 2;
         }
         else return -1;
     }
     // Check if greater than or equal
     if(op_code == 3){
-        if(REGISTER_FILE[instr.type1.r_dest] >= REGISTER_FILE[instr.type1.r_src]){
+        if(REGISTER_FILE[op_a >= op_b]){
             return 3;
         }
         else return -1;
     }
     // Check for inequality
     if(op_code == 4){
-        if(REGISTER_FILE[instr.type1.r_dest] != REGISTER_FILE[instr.type1.r_src]){
+        if(op_a != op_b){
             return 4;
         }
         else return -1;
     }
-    if(op_code == 7){
-        REGISTER_FILE[instr.type1.r_dest] = REGISTER_FILE[instr.type1.r_src]
-                                - instr.type1.label;
-        return 0;
-    }
     // Sub
     if(op_code == 8){
-        REGISTER_FILE[instr.type1.r_dest] = REGISTER_FILE[instr.type1.r_src]
-                                - instr.type1.label;
-        return 0;
+        printf("Op A: %d\n", op_a);
+        return (op_a - op_b);
     }
     return -1;
     
