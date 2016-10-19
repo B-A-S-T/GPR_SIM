@@ -48,6 +48,7 @@ char string_allocation[NUM_STRINGS][STRING_SIZE]; // Keeping up with Allocation
 int string_addresses[NUM_STRINGS];
 int string_lengths[NUM_STRINGS];
 mem_word REGISTER_FILE[NUM_REGISTERS]; // Keeping up with Registers
+int instruction_count;
 
 /*
 	Each type of instruction gets its own struct for easy organization.
@@ -124,7 +125,7 @@ int alu(int op_a, int op_b, int op_code);
 int check_allocated(char* match);
 int syscall(mem_word function);
 int get_index(int match);
-struct if_id _if(mem_addr *address);
+struct if_id _if(mem_addr *address, int *to_run);
 struct id_exe _id(struct if_id to_decode, mem_addr *pc);
 struct exe_mem _exe(struct id_exe to_execute);
 struct mem_wb _mem(struct exe_mem to_access);
@@ -148,101 +149,55 @@ int main(int argc, char *argv[]){
     make_memory();
     parse_source_code(argv[1]);
     instruction instr;
+    int run = 1;
+    int warm_up = 0;
+    int cooldown = 0;
     int usermode = 1;
     mem_addr pc = TEXT_START; // PC
-    int type;
     float C = 0;
     float IC = 0;
-    unsigned int op_code;
-        if_id_new = _if(&pc);
-        id_exe_new = _id(if_id_new, &pc);
-        exe_mem_new = _exe(id_exe_new);
-        mem_wb_new = _mem(exe_mem_new);
-        _wb(mem_wb_new);
-    while(run){
-        if_id_old = if_id_new;
-        if_id_new = _if(&pc);
-        id_exe_old = id_exe_new;
-        id_exe_new = _id(if_id_old, &pc);
-        exe_mem_old = exe_mem_new;
-        exe_mem_new = _exe(id_exe_old);
-        mem_wb_old = mem_wb_new;
-        mem_wb_new = _mem(exe_mem_old);
-        _wb(mem_wb_old);
+    // Source files longer than or equal to 5 instructions
+    printf("Instruction count: %d\n", instruction_count);
+    if((instruction_count) >= 4){
+        while(run){
+            if(warm_up >= 0){
+                if_id_old = if_id_new;
+                if_id_new = _if(&pc, &run);
+            }
+            if(warm_up > 0){
+                id_exe_old = id_exe_new;
+                id_exe_new = _id(if_id_old, &pc);
+            }
+            if(warm_up > 1){
+                exe_mem_old = exe_mem_new;
+                exe_mem_new = _exe(id_exe_old);
+            }
+            if(warm_up > 2){
+                mem_wb_old = mem_wb_new;
+                mem_wb_new = _mem(exe_mem_old);
+            }
+            if(warm_up > 3){
+                _wb(mem_wb_old);
+            }
+            warm_up += 1;
+            }
+            // Pushes the last few instructions through the pipeline
+            while(cooldown < 3){
+                if(cooldown < 1){
+                    exe_mem_old = exe_mem_new;
+                    exe_mem_new = _exe(id_exe_old);
+                }
+                if(cooldown < 2){
+                    mem_wb_old = mem_wb_new;
+                    mem_wb_new = _mem(exe_mem_old);
+                }
+                _wb(mem_wb_old);
+                cooldown += 1;
+            }
     }
+    
     printf("Register 3: %d\n", REGISTER_FILE[3]);
 /*
-    while(usermode){
-        instr = read_inst(pc);
-        instruc = decode(instr);
-        type = instruc.type;
-
-        // Since we know type, we can dynamicly grab the correct
-        // op code
-        if(type == 1) op_code = instruc.type1.op_code;
-        if(type == 2) op_code = instruc.type2.op_code;
-        if(type == 3) op_code = instruc.type3.op_code;
-        pc += 1;
-        switch((unsigned int)op_code){
-            case 0: // ADDI
-                alu(instruc, instruc.type1.op_code);
-                C += 6;
-                break;
-            case 1: // B
-                pc = TEXT_START + instruc.type3.label;
-                pc += 1;
-                C += 4;
-                break;
-            case 2: // BEQZ
-                if(alu(instruc, instruc.type2.op_code) == 2){
-                    pc = TEXT_START + instruc.type2.label;
-                    pc += 1;
-                    C += 5;
-                }
-                break;
-            case 3: // BGE
-                if(alu(instruc, instruc.type1.op_code) == 3){
-                    pc = TEXT_START + instruc.type1.label;
-                    pc += 1;
-                    C += 5;
-                }
-                break;
-            case 4: // BNE
-                if(alu(instruc, instruc.type1.op_code) == 4){
-                    pc = TEXT_START + instruc.type1.label;
-                    pc += 1;
-                    C += 5;
-                }
-                break;
-            case 5: // LA
-                REGISTER_FILE[instruc.type2.r_target] = DATA_START + instruc.type2.label;
-                C += 5;
-                break;
-            case 6: // LB
-                REGISTER_FILE[instruc.type1.r_dest] = 
-                            read_mem((REGISTER_FILE[instruc.type1.r_src] 
-                            + instruc.type1.label));
-                C += 6;
-                break;
-            case 7: // LI
-                REGISTER_FILE[instruc.type2.r_target] = instruc.type2.label;
-                C += 3;
-                break;
-            case 8: // SUBI
-                alu(instruc, instruc.type1.op_code);
-                C += 6;
-                break;
-            case 9: // SYSCALL
-                if(instruc.type3.label == 9){
-                usermode = 0; 
-                }
-                C += 8;
-                syscall(instruc.type3.label);
-                break;
-        }
-        IC += 1;
-    }
-    // Calculation
     printf("IC = %f\n C = %f\n Ratio = %f\n", IC, C, (8*IC)/C);
 */
     free(data_segment);
@@ -278,7 +233,7 @@ void parse_source_code(char *filename){
     short data_load = 0;
     size_t length = 0;
     ssize_t read;
-    int *text_index = 0;
+    int text_index = 0;
     char *token = NULL;
     char *line = NULL;
     fp = fopen(filename, "r");
@@ -293,7 +248,7 @@ void parse_source_code(char *filename){
             //In data section of parse
                 if(strcmp(line, ".data") == 0){
                      data_load = 1;
-                     continue;
+                continue;
                 }
             //Exit data section of parse
                 if(strcmp(line, ".text") == 0){
@@ -308,7 +263,7 @@ void parse_source_code(char *filename){
                 }
             }
     }
-
+     instruction_count = text_index - 1;
 }
 
 /*Description: Loads data elements from source into simulated data segment.
@@ -568,13 +523,18 @@ char read_mem(mem_addr address){
       Params: address - address to read from
       Returns: insrtuction - returns the contents
 */
-struct if_id _if(mem_addr *address){
+struct if_id _if(mem_addr *address, int *to_run){
     struct if_id fetched;
-    if((*address <  TEXT_TOP) && (*address >= TEXT_START)){
+    if((*address <  TEXT_TOP) && (*address >= TEXT_START) && ((*address - TEXT_START) <= instruction_count)){
         fetched.instr = text_segment[(*address - TEXT_START)];
         *address += 1;
         return fetched;
-}
+    }
+    else{
+        printf("Failed to fetch: %d\n", *address - TEXT_START);
+        *to_run = 0;
+        return fetched;
+    }
 }
 
 /*Description: Writes memory to the text_segment.

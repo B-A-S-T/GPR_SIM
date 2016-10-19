@@ -4,11 +4,9 @@
 
 .text
 LI $5, 50
+LI $5, 50
+LI $5, 50
+LI $5, 50
 LI $1, 50
 ADD $3, $5, $1
-NOP
-NOP
-NOP
-NOP
-NOP
 
