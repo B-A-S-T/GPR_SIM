@@ -158,7 +158,7 @@ int main(int argc, char *argv[]){
     float IC = 0;
     // Source files longer than or equal to 5 instructions
     printf("Instruction count: %d\n", instruction_count);
-    if((instruction_count) >= 4){
+    if(instruction_count >= 4){
         while(run){
             if(warm_up >= 0){
                 if_id_old = if_id_new;
@@ -182,6 +182,7 @@ int main(int argc, char *argv[]){
             warm_up += 1;
             }
             // Pushes the last few instructions through the pipeline
+            id_exe_old = id_exe_new;
             while(cooldown < 3){
                 if(cooldown < 1){
                     exe_mem_old = exe_mem_new;
@@ -192,6 +193,8 @@ int main(int argc, char *argv[]){
                     mem_wb_new = _mem(exe_mem_old);
                 }
                 _wb(mem_wb_old);
+                exe_mem_old = exe_mem_new;
+                mem_wb_old = mem_wb_new;
                 cooldown += 1;
             }
     }
@@ -572,8 +575,6 @@ void write_mem(mem_addr address, char *value){
 struct id_exe _id(struct if_id to_decode, mem_addr *pc){
     struct instruction_container instruction;
     struct id_exe decoded;
-    REGISTER_FILE[5] = 4;
-    REGISTER_FILE[1] = 11;
     unsigned int op_code = (to_decode.instr >> 28) & 0x0000000f;
     mem_word dest;
     mem_word src;
@@ -591,7 +592,6 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc){
         decoded.instruction = instruction;
         // ADD needs the values in two registers
         if((unsigned int) op_code == 11){
-            printf("Reg1: %d   Reg2: %d\n", instruction.type1.r_src, instruction.type1.label);
             decoded.op_a = REGISTER_FILE[instruction.type1.r_src];
             decoded.op_b = REGISTER_FILE[instruction.type1.label];
         }
@@ -717,7 +717,7 @@ struct exe_mem _exe(struct id_exe to_execute){
             case 11:
                 exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, 0);
                 exe_latch.r_dest = to_execute.instruction.type1.r_dest;
-                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
+                printf("IN EXE__________--ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
                 break;
         }
         return exe_latch;
@@ -726,6 +726,7 @@ struct exe_mem _exe(struct id_exe to_execute){
 struct mem_wb _mem(struct exe_mem to_access){
     struct mem_wb to_write_back;
     to_write_back.op_code = to_access.op_code;
+    printf("Last op_code:%d \n", to_access.op_code);
     to_write_back.ALU_out = to_access.ALU_out;
     to_write_back.reg_dest = to_access.r_dest;
     if((unsigned int) to_access.op_code == 6){
