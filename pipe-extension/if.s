@@ -3,7 +3,12 @@
 .space string 1024
 
 .text
-ADD $3, $5, $1
+LI $5, 50
 LI $1, 50
-LI $2, 50
-ADD $2, $2, $1
+ADD $3, $5, $1
+NOP
+NOP
+NOP
+NOP
+NOP
+

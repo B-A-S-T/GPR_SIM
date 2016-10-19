@@ -88,8 +88,6 @@ struct id_exe{
     // which type of instruction
     struct instruction_container instruction;
     //values in registers
-    int label;
-    int new_pc;
     int op_a;
     int op_b; 
 };
@@ -129,6 +127,8 @@ int get_index(int match);
 struct if_id _if(mem_addr *address);
 struct id_exe _id(struct if_id to_decode, mem_addr *pc);
 struct exe_mem _exe(struct id_exe to_execute);
+struct mem_wb _mem(struct exe_mem to_access);
+void _wb(struct mem_wb to_write);
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
@@ -154,19 +154,23 @@ int main(int argc, char *argv[]){
     float C = 0;
     float IC = 0;
     unsigned int op_code;
-    if_id_old = if_id_new;
-    if_id_new = _if(&pc);
-    id_exe_old = id_exe_new;
-    id_exe_new = _id(if_id_new, &pc);
-
-    exe_mem_old = exe_mem_new;
-    exe_mem_new = _exe(id_exe_new);
-/*    
-    mem_wb_old = mem_wb_new;
-    mem_wb_new = _mem(exe_mem_old);
-    
-    _wb(mem_wb_old);
-*/
+        if_id_new = _if(&pc);
+        id_exe_new = _id(if_id_new, &pc);
+        exe_mem_new = _exe(id_exe_new);
+        mem_wb_new = _mem(exe_mem_new);
+        _wb(mem_wb_new);
+    while(run){
+        if_id_old = if_id_new;
+        if_id_new = _if(&pc);
+        id_exe_old = id_exe_new;
+        id_exe_new = _id(if_id_old, &pc);
+        exe_mem_old = exe_mem_new;
+        exe_mem_new = _exe(id_exe_old);
+        mem_wb_old = mem_wb_new;
+        mem_wb_new = _mem(exe_mem_old);
+        _wb(mem_wb_old);
+    }
+    printf("Register 3: %d\n", REGISTER_FILE[3]);
 /*
     while(usermode){
         instr = read_inst(pc);
@@ -608,6 +612,8 @@ void write_mem(mem_addr address, char *value){
 struct id_exe _id(struct if_id to_decode, mem_addr *pc){
     struct instruction_container instruction;
     struct id_exe decoded;
+    REGISTER_FILE[5] = 4;
+    REGISTER_FILE[1] = 11;
     unsigned int op_code = (to_decode.instr >> 28) & 0x0000000f;
     mem_word dest;
     mem_word src;
@@ -754,8 +760,51 @@ struct exe_mem _exe(struct id_exe to_execute){
                 printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
                 break;
         }
+        return exe_latch;
 }
 
+struct mem_wb _mem(struct exe_mem to_access){
+    struct mem_wb to_write_back;
+    to_write_back.op_code = to_access.op_code;
+    to_write_back.ALU_out = to_access.ALU_out;
+    to_write_back.reg_dest = to_access.r_dest;
+    if((unsigned int) to_access.op_code == 6){
+        to_write_back.MDR = read_mem(to_write_back.ALU_out);
+    }
+    return to_write_back;
+}
+
+void  _wb(struct mem_wb to_write){
+    if((unsigned int) to_write.op_code == 6){
+        REGISTER_FILE[to_write.reg_dest] = to_write.MDR;
+    }
+    // Need to change to if statement to ignore other cases
+    else if((unsigned int) to_write.op_code != 10){
+        REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
+    }
+
+/*    switch((unsigned int) mem_wb.op_code){
+        case 0:
+                
+            break;
+        case 6:
+    
+            break;
+        case 7:
+    
+            break;
+        case 8:
+    
+            break;
+        case 8:
+    
+            break;
+        case 11:
+    
+            break;
+    }
+*/
+}
 /*Description: Does standard alu calculations.
   Params: struct instruction_container - instruction, int op_code - alu function code
   Returns: returns the value of op code if correctly completes.
