@@ -1,12 +1,15 @@
 .data
 .label tast 0x50000003
-.space string 1024
+.space string_space 1024
 
 .text
-LI $5, 50
-LI $5, 50
-LI $5, 50
-LI $5, 50
-LI $1, 50
-ADD $3, $5, $1
+LA $0, string_space
+NOP
+NOP
+SYSCALL 0
+LA $1, string_space
+LI $5, 1
+LB $3, ($1)
+NOP
+ADD $3, $3, $5
 

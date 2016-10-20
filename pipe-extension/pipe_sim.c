@@ -60,7 +60,7 @@ struct instr_type1{
     mem_word label;
 };
 struct instr_type2{
-    mem_word op_code;
+    unsigned int op_code;
     mem_word r_target;
     mem_word label;
 };
@@ -102,7 +102,7 @@ struct exe_mem{
 
 struct mem_wb {
     unsigned int op_code;
-    mem_word MDR; // Data from memory
+    char MDR; // Data from memory
     int op_b; // where to load word
     mem_word ALU_out; // R-TYPE
     mem_word reg_dest; // where to write back    
@@ -127,7 +127,7 @@ int syscall(mem_word function);
 int get_index(int match);
 struct if_id _if(mem_addr *address, int *to_run);
 struct id_exe _id(struct if_id to_decode, mem_addr *pc);
-struct exe_mem _exe(struct id_exe to_execute);
+struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb *new);
 struct mem_wb _mem(struct exe_mem to_access);
 void _wb(struct mem_wb to_write);
 
@@ -170,7 +170,7 @@ int main(int argc, char *argv[]){
             }
             if(warm_up > 1){
                 exe_mem_old = exe_mem_new;
-                exe_mem_new = _exe(id_exe_old);
+                exe_mem_new = _exe(id_exe_old, &exe_mem_old, &mem_wb_new);
             }
             if(warm_up > 2){
                 mem_wb_old = mem_wb_new;
@@ -179,6 +179,7 @@ int main(int argc, char *argv[]){
             if(warm_up > 3){
                 _wb(mem_wb_old);
             }
+            printf("NEXT CLOCK CYCLE:\n\n\n");
             warm_up += 1;
             }
             // Pushes the last few instructions through the pipeline
@@ -186,7 +187,7 @@ int main(int argc, char *argv[]){
             while(cooldown < 3){
                 if(cooldown < 1){
                     exe_mem_old = exe_mem_new;
-                    exe_mem_new = _exe(id_exe_old);
+                    exe_mem_new = _exe(id_exe_old, &exe_mem_old, &mem_wb_new);
                 }
                 if(cooldown < 2){
                     mem_wb_old = mem_wb_new;
@@ -199,6 +200,7 @@ int main(int argc, char *argv[]){
             }
     }
     
+    printf("Register 3: %d\n", string_allocation[REGISTER_FILE[3] - DATA_START]);
     printf("Register 3: %d\n", REGISTER_FILE[3]);
 /*
     printf("IC = %f\n C = %f\n Ratio = %f\n", IC, C, (8*IC)/C);
@@ -327,9 +329,12 @@ void load_text(char* token, int *index){
     instruction new_instruction;
     mem_addr address = TEXT_START + *index;
     int label_index = 0;
-    //Nop
-    if(op_code == 10){
-        write_instr(address,0);
+    if((unsigned int)op_code == 10){
+        struct instr_type1 instruction;
+        instruction.op_code = op_code;
+        new_instruction = type1_create(instruction);
+        unsigned int new = (new_instruction >> 28) & 0x0000000f;
+        write_instr(address, new_instruction);
         *index += 1;
     }
     // Type 1 Instructions
@@ -440,6 +445,7 @@ void load_text(char* token, int *index){
 instruction type1_create(struct instr_type1 instr){
     instruction new_instruction = 0;
     new_instruction = (instr.op_code << 28) | new_instruction;
+    if(instr.op_code == 10) return new_instruction;
     new_instruction = (instr.r_dest << 23) | new_instruction;
     new_instruction = (instr.r_src << 18) | new_instruction;
     new_instruction = (instr.label & 0x001fffff) | new_instruction;
@@ -534,7 +540,6 @@ struct if_id _if(mem_addr *address, int *to_run){
         return fetched;
     }
     else{
-        printf("Failed to fetch: %d\n", *address - TEXT_START);
         *to_run = 0;
         return fetched;
     }
@@ -632,7 +637,7 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc){
     }
     //NOP
     else if((unsigned int) op_code == 10){
-        instruction.type3.op_code == (mem_word) op_code;
+        instruction.type1.op_code == (mem_word) op_code;
         instruction.type = 3;
         decoded.instruction = instruction;
     }
@@ -667,8 +672,7 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc){
     // Return the id_exe latch
     return decoded;
 }
-
-struct exe_mem _exe(struct id_exe to_execute){
+struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb *new){
         unsigned int op_code;
         struct exe_mem exe_latch;
         int type = to_execute.instruction.type;
@@ -677,6 +681,55 @@ struct exe_mem _exe(struct id_exe to_execute){
         if(type == 3) op_code = to_execute.instruction.type3.op_code;
         exe_latch.op_code = op_code;
         printf("Op_code: %lu\n", exe_latch.op_code);
+        // AddI and SUBI MEM HAzArds
+        if((exe_latch.op_code == 0) || (unsigned int)exe_latch.op_code == 8){
+            if(to_execute.instruction.type1.r_src == (*new).reg_dest){
+                to_execute.op_a = (*new).ALU_out;
+            }
+        }
+        // ADD MEM HAZARD
+        if((unsigned int)exe_latch.op_code == 11){
+            //printf("MEM HAZARDS\n");
+            if(to_execute.instruction.type1.r_src == (*new).reg_dest){
+                to_execute.op_a = (*new).ALU_out;
+            }
+            if(to_execute.instruction.type1.label == (*new).reg_dest){
+                to_execute.op_b= (*new).ALU_out;
+            }
+        }
+        // LB MEM HAZARD
+        if(exe_latch.op_code == 6){
+            if(to_execute.instruction.type1.r_src == (*new).reg_dest){
+                to_execute.op_a = (*new).MDR;
+            }
+
+        }
+        // ADDI and SUBI EXE HAZARDS
+        if((exe_latch.op_code == 0) || (unsigned int)exe_latch.op_code == 8){
+            if(to_execute.instruction.type1.r_src == (*old).r_dest){
+                to_execute.op_a = (*old).ALU_out;
+            }
+        }
+        // ADD EXE HAZARD
+        if((unsigned int)exe_latch.op_code == 11){
+            //printf("EXE HAZARDS\n");
+            if(to_execute.instruction.type1.r_src == (*old).r_dest){
+                to_execute.op_a = (*old).ALU_out;
+            }
+            if(to_execute.instruction.type1.label == (*old).r_dest){
+                to_execute.op_b= (*old).ALU_out;
+            }
+        }
+    /* Branches already done might or might not need this
+        if((to_execute.op_code == 3) || (unsigned int)to_execute.op_code == 4){
+            if(to_execute.instruction.type2.r_src == *new.reg_dest){
+                to_execute.op_b = *new.ALU_out;
+            }
+            if(to_execute.instruction.type1.r_dest == *new.reg_dest){
+                to_execute.op_a = *new.ALU_out;
+            }
+        }
+*/
         switch((unsigned int)op_code){
             case 0: // ADDI
                 exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, exe_latch.op_code);
@@ -689,7 +742,7 @@ struct exe_mem _exe(struct id_exe to_execute){
                 exe_latch.r_dest = to_execute.instruction.type2.r_target;
                 //Offset
                 exe_latch.ALU_out = to_execute.instruction.type2.label + DATA_START;
-                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
+                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out - DATA_START, exe_latch.r_dest);
                 break;
             case 6: // LB
                 // Offset for target memory address
@@ -704,7 +757,6 @@ struct exe_mem _exe(struct id_exe to_execute){
                 printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
                 break;
             case 8: // SUBI
-                printf("OP_B: %d\n", to_execute.op_b);
                 exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, exe_latch.op_code);
                 //Destination foward
                 exe_latch.r_dest = to_execute.instruction.type1.r_dest;
@@ -712,7 +764,7 @@ struct exe_mem _exe(struct id_exe to_execute){
                 break;
             case 9: // SYSCALL
                 printf("SYSCALL NUM: %d\n", to_execute.op_a);
-                //syscall(to_execute.op_a);
+                syscall(to_execute.op_a);
                 break;
             case 11:
                 exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, 0);
@@ -726,7 +778,6 @@ struct exe_mem _exe(struct id_exe to_execute){
 struct mem_wb _mem(struct exe_mem to_access){
     struct mem_wb to_write_back;
     to_write_back.op_code = to_access.op_code;
-    printf("Last op_code:%d \n", to_access.op_code);
     to_write_back.ALU_out = to_access.ALU_out;
     to_write_back.reg_dest = to_access.r_dest;
     if((unsigned int) to_access.op_code == 6){
