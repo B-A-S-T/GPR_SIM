@@ -3,20 +3,20 @@
 .space string_space 1024
 
 .text
-LA $0, string_space
-NOP
-NOP
-SYSCALL 0
-LA $1, string_space
-LI $5, 0
-LI $6, 2
-LB $3, ($1)
-NOP
-ADDI $3, $3, 1
-ADDI $5, $5, 1
-NOP
-BNE $5, $6, test
-NOP
+la $0, string_space
+nop
+nop
+syscall 0
+la $1, string_space
+li $5, 0
+li $6, 2
+lb $3, ($1)
+nop
+addi $3, $3, 1
+addi $5, $5, 1
+nop
+bne $5, $6, test
+nop
 
 
 

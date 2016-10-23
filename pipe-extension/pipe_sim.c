@@ -157,7 +157,7 @@ int main(int argc, char *argv[]){
     float C = 0;
     float IC = 0;
     // Source files longer than or equal to 5 instructions
-    printf("Instruction count: %d\n", instruction_count);
+    //printf("Instruction count: %d\n", instruction_count);
     if(instruction_count >= 4){
         while(run){
             if(warm_up >= 0){
@@ -179,7 +179,7 @@ int main(int argc, char *argv[]){
             if(warm_up > 3){
                 _wb(mem_wb_old);
             }
-            printf("NEXT CLOCK CYCLE:\n\n\n");
+            printf("\n");
             warm_up += 1;
             }
             // Pushes the last few instructions through the pipeline
@@ -200,7 +200,7 @@ int main(int argc, char *argv[]){
             }
     }
     
-    printf("Register 3: %c\n", REGISTER_FILE[3]);
+    //printf("Register 3: %c\n", REGISTER_FILE[3]);
 /*
     printf("IC = %f\n C = %f\n Ratio = %f\n", IC, C, (8*IC)/C);
 */
@@ -418,12 +418,15 @@ void load_text(char* token, int *index){
         char reg[3];
         char offset[10];
         int reg_index;
+        int close_par_index;
         instruction.op_code = op_code;
         instr = strtok(NULL, ", "); // Reg_dest
         instruction.r_dest = (mem_word) strtol(instr + 1, (char **)NULL, 10);
         instr = strtok(NULL, ", "); // Second half
         reg_index = strcspn(instr, "$");
-        memcpy(reg, instr + reg_index + 1, strlen(instr) - reg_index -2);
+        close_par_index = strcspn(instr, ")");
+        
+        memcpy(reg, instr + reg_index + 1, (close_par_index - reg_index));
         instruction.r_src = strtol(reg, (char **)NULL, 10); // Reg_src
         memcpy(offset, instr, reg_index - 1);
         offset[(reg_index-1)] = '\0';
@@ -482,18 +485,18 @@ instruction type3_create(struct instr_type3 instr){
   Returns: instruction - opcode number or address for an instruction
 */
 int get_opCode(char *instr){
-    if(strcmp(instr, "ADDI") == 0) return 0;
-    else if (strcmp(instr, "B") == 0) return 1;
-    else if (strcmp(instr, "BEQZ") == 0) return 2;
-    else if (strcmp(instr, "BGE") == 0) return 3;
-    else if (strcmp(instr, "BNE") == 0) return 4;
-    else if (strcmp(instr, "LA") == 0) return 5;
-    else if (strcmp(instr, "LB") == 0) return 6;
-    else if (strcmp(instr, "LI") == 0) return 7;
-    else if (strcmp(instr, "SUBI") == 0) return 8;
-    else if (strcmp(instr, "SYSCALL") == 0) return 9;
-    else if (strcmp(instr, "NOP") == 0) return 10;
-    else if (strcmp(instr, "ADD") == 0) return 11;
+    if(strcmp(instr, "addi") == 0) return 0;
+    else if (strcmp(instr, "b") == 0) return 1;
+    else if (strcmp(instr, "beqz") == 0) return 2;
+    else if (strcmp(instr, "bge") == 0) return 3;
+    else if (strcmp(instr, "bne") == 0) return 4;
+    else if (strcmp(instr, "la") == 0) return 5;
+    else if (strcmp(instr, "lb") == 0) return 6;
+    else if (strcmp(instr, "li") == 0) return 7;
+    else if (strcmp(instr, "subi") == 0) return 8;
+    else if (strcmp(instr, "syscall") == 0) return 9;
+    else if (strcmp(instr, "nop") == 0) return 10;
+    else if (strcmp(instr, "add") == 0) return 11;
     else return -1;
 }
 
@@ -791,7 +794,7 @@ struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb
         if(type == 2) op_code = to_execute.instruction.type2.op_code;
         if(type == 3) op_code = to_execute.instruction.type3.op_code;
         exe_latch.op_code = op_code;
-        printf("Op_code: %lu\n", exe_latch.op_code);
+        //printf("Op_code: %lu\n", exe_latch.op_code);
         // AddI and SUBI MEM HAzArds
         if((exe_latch.op_code == 0) || (unsigned int)exe_latch.op_code == 8){
             if(to_execute.instruction.type1.r_src == (*new).reg_dest){
@@ -824,6 +827,9 @@ struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb
         if(exe_latch.op_code == 6){
             if(to_execute.instruction.type1.r_src == (*new).reg_dest){
                 to_execute.op_a = (*new).ALU_out;
+            }
+            if(to_execute.instruction.type1.r_src == (*old).r_dest){
+                to_execute.op_a = (*old).ALU_out;
             }
 
         }
