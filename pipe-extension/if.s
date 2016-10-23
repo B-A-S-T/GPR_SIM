@@ -1,5 +1,5 @@
 .data
-.label tast 0x50000003
+.label test 0x50000008
 .space string_space 1024
 
 .text
@@ -8,8 +8,15 @@ NOP
 NOP
 SYSCALL 0
 LA $1, string_space
-LI $5, 1
+LI $5, 0
+LI $6, 2
 LB $3, ($1)
 NOP
-ADD $3, $3, $5
+ADDI $3, $3, 1
+ADDI $5, $5, 1
+NOP
+BNE $5, $6, test
+NOP
+
+
 

@@ -126,7 +126,7 @@ int check_allocated(char* match);
 int syscall(mem_word function);
 int get_index(int match);
 struct if_id _if(mem_addr *address, int *to_run);
-struct id_exe _id(struct if_id to_decode, mem_addr *pc);
+struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new, struct mem_wb *mem_new);
 struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb *new);
 struct mem_wb _mem(struct exe_mem to_access);
 void _wb(struct mem_wb to_write);
@@ -166,7 +166,7 @@ int main(int argc, char *argv[]){
             }
             if(warm_up > 0){
                 id_exe_old = id_exe_new;
-                id_exe_new = _id(if_id_old, &pc);
+                id_exe_new = _id(if_id_old, &pc, &exe_mem_new, &mem_wb_new);
             }
             if(warm_up > 1){
                 exe_mem_old = exe_mem_new;
@@ -200,8 +200,7 @@ int main(int argc, char *argv[]){
             }
     }
     
-    printf("Register 3: %d\n", string_allocation[REGISTER_FILE[3] - DATA_START]);
-    printf("Register 3: %d\n", REGISTER_FILE[3]);
+    printf("Register 3: %c\n", REGISTER_FILE[3]);
 /*
     printf("IC = %f\n C = %f\n Ratio = %f\n", IC, C, (8*IC)/C);
 */
@@ -351,7 +350,7 @@ void load_text(char* token, int *index){
             label_index = find_label(instr);
             instruction.label = label_index;
         }
-        if((unsigned int)op_code == 11){
+        else if((unsigned int)op_code == 11){
         instruction.label = (mem_word) strtol(instr + 1, (char **)NULL, 10);
         }
         else{
@@ -577,7 +576,7 @@ void write_mem(mem_addr address, char *value){
   Returns: struct instruction_container - container with the correct
   		   instruction inside.
 */
-struct id_exe _id(struct if_id to_decode, mem_addr *pc){
+struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new, struct mem_wb *mem_new){
     struct instruction_container instruction;
     struct id_exe decoded;
     unsigned int op_code = (to_decode.instr >> 28) & 0x0000000f;
@@ -611,7 +610,6 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc){
             decoded.op_a = REGISTER_FILE[instruction.type1.r_src];
             decoded.op_b = instruction.type1.label;
         }
-        return decoded;
     }
     // Type 2
     else if((op_code == 2) || (op_code ==5) || (op_code == 7)){
@@ -641,12 +639,125 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc){
         instruction.type = 3;
         decoded.instruction = instruction;
     }
+
+    switch((unsigned int) op_code){
+        case 0:
+            // ADDI Hazard where the source register is being written this clock cycle
+            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
+                decoded.op_a = (*mem_new).ALU_out;
+                // LB reads from memory so we have to use MDR instead of ALU_OUT
+                if((*mem_new).op_code == 6){
+                    decoded.op_a = (*mem_new).MDR;
+                }
+            }
+            break; 
+        case 2:
+            // BEQZ Hazard where the target is to be written this clock cycle
+            if(decoded.instruction.type2.r_target == (*mem_new).reg_dest){
+                decoded.op_a = (*mem_new).ALU_out;
+                if((*mem_new).op_code == 6){
+                    decoded.op_a = (*mem_new).MDR;
+                }
+            }
+            // Hazard where the target was calculated last clock cycle cycle in exe
+            if(decoded.instruction.type2.r_target == (*exe_new).r_dest){
+                decoded.op_a = (*exe_new).ALU_out;
+            }
+            break; 
+        case 3:
+            // BGE Hazard where the src or dest is to be written this clock cycle
+            if(decoded.instruction.type1.r_dest == (*mem_new).reg_dest){
+                decoded.op_a = (*mem_new).ALU_out;
+                if((*mem_new).op_code == 6){
+                    decoded.op_a = (*mem_new).MDR;
+                }
+            }
+            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
+                decoded.op_b = (*mem_new).ALU_out;
+                if((*mem_new).op_code == 6){
+                    decoded.op_a = (*mem_new).MDR;
+                }
+            }
+            // Hazard where the src or dest was calculated last clock cycle in exe
+            if(decoded.instruction.type1.r_dest == (*exe_new).r_dest){
+                decoded.op_a = (*exe_new).ALU_out;
+            }
+            if(decoded.instruction.type1.r_src == (*exe_new).r_dest){
+                decoded.op_b = (*exe_new).ALU_out;
+            }
+            break; 
+        case 4:
+            // BNE Hazard where the src or dest is to be written this clock cycle
+            if(decoded.instruction.type1.r_dest == (*mem_new).reg_dest){
+                decoded.op_a = (*mem_new).ALU_out;
+                if((*mem_new).op_code == 6){
+                    decoded.op_a = (*mem_new).MDR;
+                }
+            }
+            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
+                decoded.op_b = (*mem_new).ALU_out;
+                if((*mem_new).op_code == 6){
+                    decoded.op_b = (*mem_new).MDR;
+                }
+            }
+            // Hazard where the src or dest was calcuated last clock cycle in exe
+            if(decoded.instruction.type1.r_dest == (*exe_new).r_dest){
+                decoded.op_a = (*exe_new).ALU_out;
+            }
+            if(decoded.instruction.type1.r_src == (*exe_new).r_dest){
+                decoded.op_b = (*exe_new).ALU_out;
+            }
+            break; 
+        case 8:
+            // SUB source register is to be written this clock cycle
+            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
+                decoded.op_a = (*mem_new).ALU_out;
+                if((*mem_new).op_code == 6){
+                    decoded.op_a = (*mem_new).MDR;
+                }
+            }
+            break; 
+        case 11:
+            // ADD source or destination register is to be written this clock cycle
+            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
+                decoded.op_a = (*mem_new).ALU_out;
+                if((*mem_new).op_code == 6){
+                    decoded.op_a = (*mem_new).MDR;
+                }
+            }
+            if(decoded.instruction.type1.label == (*mem_new).reg_dest){
+                decoded.op_b = (*mem_new).ALU_out;
+                if((*mem_new).op_code == 6){
+                    decoded.op_b = (*mem_new).MDR;
+                }
+            }
+            break;
+        case 6:
+            // LB the source register is to be written to this clock cycle
+            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
+                // Grab the value out of that will be loaded into that register
+                decoded.op_a = (*mem_new).ALU_out;
+            }
+            break;
+        /*case 0:
+            break; 
+        case 0:
+            break; 
+        case 0:
+            break; 
+        case 0:
+            break; 
+        case 0:
+            break; 
+*/
+        }
+    
     /*
         Branches will start here.
         We have to update branches in the Decode stage.
     */
     // Unconditional Branch
-    else if(op_code == 1){
+    if(op_code == 1){
         *pc = TEXT_START + decoded.op_a;
         *pc += 1;
     }
@@ -662,8 +773,8 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc){
         }
         // BGE and BNE are both type 1 instructions
         if((op_code == 3) || (op_code == 4)){
-            if((alu(decoded.op_a, decoded.op_b, instruction.type1.op_code) == 3) ||
-                                 (alu(decoded.op_a, decoded.op_b, instruction.type1.op_code == 4))){
+            int branch = alu(decoded.op_a, decoded.op_b, instruction.type1.op_code);
+            if((branch == 4) || (branch == 3)){
                 *pc = TEXT_START + instruction.type1.label;
                 *pc += 1;
             }
@@ -685,6 +796,9 @@ struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb
         if((exe_latch.op_code == 0) || (unsigned int)exe_latch.op_code == 8){
             if(to_execute.instruction.type1.r_src == (*new).reg_dest){
                 to_execute.op_a = (*new).ALU_out;
+                if((*new).op_code == 6){
+                    to_execute.op_a = (*new).MDR;
+                }
             }
         }
         // ADD MEM HAZARD
@@ -692,15 +806,24 @@ struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb
             //printf("MEM HAZARDS\n");
             if(to_execute.instruction.type1.r_src == (*new).reg_dest){
                 to_execute.op_a = (*new).ALU_out;
+                if((*new).op_code == 6){
+                    to_execute.op_a = (*new).MDR;
+                }
             }
             if(to_execute.instruction.type1.label == (*new).reg_dest){
                 to_execute.op_b= (*new).ALU_out;
+                if((*new).op_code == 6){
+                    to_execute.op_b = (*new).MDR;
+                }
             }
+            /*if(REGISTER_FILE[to_execute.instruction.type1.label] != to_execute.op_b){
+                to_execute.op_b = REGISTER_FILE[to_execute.instruction.type1.label];
+            }*/
         }
         // LB MEM HAZARD
         if(exe_latch.op_code == 6){
             if(to_execute.instruction.type1.r_src == (*new).reg_dest){
-                to_execute.op_a = (*new).MDR;
+                to_execute.op_a = (*new).ALU_out;
             }
 
         }
@@ -787,36 +910,29 @@ struct mem_wb _mem(struct exe_mem to_access){
 }
 
 void  _wb(struct mem_wb to_write){
-    if((unsigned int) to_write.op_code == 6){
-        REGISTER_FILE[to_write.reg_dest] = to_write.MDR;
-    }
-    // Need to change to if statement to ignore other cases
-    else if((unsigned int) to_write.op_code != 10){
-        REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
-    }
-
-/*    switch((unsigned int) mem_wb.op_code){
+        // write backs
+      switch((unsigned int) to_write.op_code){
         case 0:
-                
+            REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
+            break;
+        case 5:
+            REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
             break;
         case 6:
-    
+            REGISTER_FILE[to_write.reg_dest] = to_write.MDR;
             break;
         case 7:
-    
+            REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
             break;
         case 8:
-    
-            break;
-        case 8:
-    
+            REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
             break;
         case 11:
-    
+            REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
             break;
     }
-*/
 }
+
 /*Description: Does standard alu calculations.
   Params: struct instruction_container - instruction, int op_code - alu function code
   Returns: returns the value of op code if correctly completes.
@@ -836,7 +952,7 @@ int alu(int op_a, int op_b, int op_code){
     }
     // Check if greater than or equal
     if(op_code == 3){
-        if(REGISTER_FILE[op_a >= op_b]){
+        if(op_a >= op_b){
             return 3;
         }
         else return -1;
