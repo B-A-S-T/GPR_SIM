@@ -1,6 +1,6 @@
 /*
   Group 1
-  Created September 2016 by Ian Thomas with the help of Lanxin Ma.
+  Created October 2016 by Ian Thomas.
 
   Using 32 bit addressing we will be able to access 4GB of data.
   4294967296 decimal and 0x100000000 hex
@@ -104,7 +104,7 @@ struct mem_wb {
     unsigned int op_code;
     char MDR; // Data from memory
     int op_b; // where to load word
-    mem_word ALU_out; // R-TYPE
+    mem_word ALU_out; // Type1/R-Type
     mem_word reg_dest; // where to write back    
 };
 
@@ -179,7 +179,6 @@ int main(int argc, char *argv[]){
             if(warm_up > 3){
                 _wb(mem_wb_old);
             }
-            printf("\n");
             warm_up += 1;
             }
             // Pushes the last few instructions through the pipeline
@@ -200,7 +199,6 @@ int main(int argc, char *argv[]){
             }
     }
     
-    //printf("Register 3: %c\n", REGISTER_FILE[3]);
 /*
     printf("IC = %f\n C = %f\n Ratio = %f\n", IC, C, (8*IC)/C);
 */
@@ -638,8 +636,8 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new,
     }
     //NOP
     else if((unsigned int) op_code == 10){
-        instruction.type1.op_code == (mem_word) op_code;
-        instruction.type = 3;
+        instruction.type1.op_code = (mem_word) op_code;
+        instruction.type = 1;
         decoded.instruction = instruction;
     }
 
@@ -794,7 +792,11 @@ struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb
         if(type == 2) op_code = to_execute.instruction.type2.op_code;
         if(type == 3) op_code = to_execute.instruction.type3.op_code;
         exe_latch.op_code = op_code;
-        //printf("Op_code: %lu\n", exe_latch.op_code);
+        if((unsigned int) op_code == 4 || (unsigned int) op_code == 2 || (unsigned int) op_code == 1 
+                    || (unsigned int) op_code == 3 || (unsigned int) op_code == 10){
+            exe_latch.r_dest = -1;
+        }
+        printf("Op_code: %lu\n", exe_latch.op_code);
         // AddI and SUBI MEM HAzArds
         if((exe_latch.op_code == 0) || (unsigned int)exe_latch.op_code == 8){
             if(to_execute.instruction.type1.r_src == (*new).reg_dest){
