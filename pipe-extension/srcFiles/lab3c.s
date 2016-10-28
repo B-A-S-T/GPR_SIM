@@ -1,5 +1,4 @@
-
-	.text
+.text
 
 main:	li $1, 0
 	li $2, 10
