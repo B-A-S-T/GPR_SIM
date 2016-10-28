@@ -1,0 +1,129 @@
+Created by Ian Thomas with help of Lanxin Ma, October 2016.
+
+Group 1 Computer Architecture
+
+GPR with pipeline extension type arcitecture machine simulated with insperation from the MIPS/SPIM simulator.
+
+Three source files come included:
+Lab3a.s - file that loops
+Lab3b.s - palindrome detector - takes in input
+Lab3c.s - simple loop that does some addition
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Instruction set:
+add Rdest, Rsrc1, Rsrc2 - add two registers
+addi Rdest, Rsrc, Imm - add immidiate value into register
+b label - unconditional branch
+beqz Rsrc1, label - branch if equal to zero
+bge Rsrc1, Rsrc2, label - branch if Rsrc1 > Rsrc2
+bne Rsrc1, Rsrc2, label - branch if Rsrc1 != Rsrc2
+la Rdest, label - load address
+lb Rdest, offset(Rsrc) - load byte, Rsrc contains start adress plus offset
+li Rdest, imm - load immidiate value
+nop - no operation
+subi Rdest, Rsrc1, Imm - subtract immidiate value from register
+syscall Callnumber - preforms system call
+
+System calls:
+syscall 0 - read a string in, load address of string into $0
+syscall 1 - print string, load address of string into $0
+syscall 9 - exit
+syscall 6 - print a register, load register value 0-31 into $0
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Compile and run instructions:
+gcc pipe_sim.c -w -o pipe
+./pipe srcCodeFileName
+
+USAGE: 
+.data section -> .text section 
+Declare data as so: 
+
+.data 
+.asciiz "String 0" 
+.asciiz "String 1" 
+.label label_name instruction_offset_in_hex
+.space string_name num_bytes
+
+.text
+INSTRUCTIONS
+
+
+Notes on using simulator:
+1) After loading a value for a syscall, two nops are needed.
+
+la $0, my_string
+nop
+nop
+syscall 1
+
+2) Nop is needed after every load byte.
+
+lb $1, ($3)
+nop
+
+3) Nop is needed after every branch.
+b my_label
+nop
+
+4) Labels are created by counting the number of instructions starting from 0 before the
+   desired instruction location.
+.data
+.label my_label 0x50000001
+
+.text
+li $1, 0
+<Where my branch will take me>
+li $2, 1
+nop
+nop
+nop
+b my_label
+nop
+
+Look at files: lab3a,b,c.s for more examples on how to use simulator.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Oberservations:
+Lab3a.s:
+Clock cycles: 270
+Number of instructions executed: 266
+Number of Nop's: 198
+
+
+Lab3b.s, Strings "non" "tacocat" "bread":
+"non"
+Clock cycles: 63
+Number of instructions executed: 59
+Number of Nop's: 29
+
+"tacocat"
+Clock cycles: 121
+Number of instructions executed: 117
+Number of Nop's: 57
+
+"bread"
+Clock cycles: 63
+Number of instructions executed: 73
+Number of Nop's: 35
+
+Lab3c.s:
+Clock cycles: 63
+Number of instructions executed: 73
+Number of Nop's: 10
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Design:
+
+The biggest issue we had with the design of the pipeline was dealing with all the hazards.
+We needed to address the hazards not only in the decode stage, but also in the execution stage.
+We took care of this problem by fowarding the data from the exe_mem latch and the mem_wb latch for both
+decode and execution stage.
+
+With some more careful thought I could possible split this file into two parts, one to create a binary file from the source and one to actually run that, but ran into alot of trouble when trying deal with data allocation.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

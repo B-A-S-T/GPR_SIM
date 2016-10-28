@@ -3,14 +3,14 @@
 .label loop 0x50000001
 .text
 
-LI $1, 0
-LI $2, 32
+li $1, 0
+li $2, 32
 
-SUBI $2, $2, 1
-NOP
-NOP
-NOP
-NOP
-NOP
-BGE  $2, $1, loop
-NOP	
+subi $2, $2, 1
+nop
+nop
+nop
+nop
+nop
+bge  $2, $1, loop
+nop	

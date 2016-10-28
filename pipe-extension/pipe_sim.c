@@ -48,22 +48,25 @@ char string_allocation[NUM_STRINGS][STRING_SIZE]; // Keeping up with Allocation
 int string_addresses[NUM_STRINGS];
 int string_lengths[NUM_STRINGS];
 mem_word REGISTER_FILE[NUM_REGISTERS]; // Keeping up with Registers
-int instruction_count;
+int instruction_count; // number of instructions
 
 /*
 	Each type of instruction gets its own struct for easy organization.
 */
+
 struct instr_type1{
     unsigned int op_code;
     mem_word r_dest;
     mem_word r_src;
     mem_word label;
 };
+
 struct instr_type2{
     unsigned int op_code;
     mem_word r_target;
     mem_word label;
 };
+
 struct instr_type3{
     unsigned int op_code;
     mem_word label;
@@ -79,11 +82,11 @@ struct instruction_container{
     struct instr_type3 type3;
     int type;
 };
-
+// Latch that holds the fetched instruction
 struct if_id{
     instruction instr;        
 };
-
+// Latch that holds the decoded instruction
 struct id_exe{
     unsigned int op_code;
     // which type of instruction
@@ -92,20 +95,18 @@ struct id_exe{
     int op_a;
     int op_b; 
 };
-
+// Latch that holds the executed instruction
 struct exe_mem{
     unsigned int op_code; 
     mem_word ALU_out; // output
-    int op_B; //used for store word
     mem_word r_dest;
 };
-
+// Latch that holds values for writeback
 struct mem_wb {
     unsigned int op_code;
     char MDR; // Data from memory
-    int op_b; // where to load word
     mem_word ALU_out; // Type1/R-Type
-    mem_word reg_dest; // where to write back    
+    mem_word reg_dest; // register to write back    
 };
 
 /* Prototypes */
@@ -133,16 +134,16 @@ void _wb(struct mem_wb to_write);
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
-    //if_id
+    //if_id latch
     struct if_id if_id_new;
     struct if_id if_id_old;
-    //id_exe
+    //id_exe latch
     struct id_exe id_exe_new;
     struct id_exe id_exe_old;
-    //exe_mem
+    //exe_mem latch
     struct exe_mem exe_mem_new;
     struct exe_mem exe_mem_old;
-    //mem_wb
+    //mem_wb latch
     struct mem_wb mem_wb_new;
     struct mem_wb mem_wb_old;
 
@@ -150,32 +151,40 @@ int main(int argc, char *argv[]){
     parse_source_code(argv[1]);
     instruction instr;
     int run = 1;
-    int warm_up = 0;
-    int cooldown = 0;
-    int usermode = 1;
+    int warm_up = 0; // Used for coldstart
+    int cooldown = 0; // Used to push rest of instructions through pipeline
+    int clock_cycles = 0;
+    int num_nop = 0;
+    int num_instr_executed = 0;
     mem_addr pc = TEXT_START; // PC
-    float C = 0;
-    float IC = 0;
     // Source files longer than or equal to 5 instructions
-    //printf("Instruction count: %d\n", instruction_count);
+    // Note: All source files must be 5 instructions or longer, did not implement shorter files
     if(instruction_count >= 4){
         while(run){
+            clock_cycles += 1;
+            // Fetch
             if(warm_up >= 0){
                 if_id_old = if_id_new;
                 if_id_new = _if(&pc, &run);
             }
+            // Decoded
             if(warm_up > 0){
                 id_exe_old = id_exe_new;
                 id_exe_new = _id(if_id_old, &pc, &exe_mem_new, &mem_wb_new);
             }
+            // Execute
             if(warm_up > 1){
+                num_instr_executed += 1;
                 exe_mem_old = exe_mem_new;
                 exe_mem_new = _exe(id_exe_old, &exe_mem_old, &mem_wb_new);
+                if((unsigned int)exe_mem_new.op_code == 10){num_nop += 1;}
             }
+            // Memory access
             if(warm_up > 2){
                 mem_wb_old = mem_wb_new;
                 mem_wb_new = _mem(exe_mem_old);
             }
+            // Write back
             if(warm_up > 3){
                 _wb(mem_wb_old);
             }
@@ -184,9 +193,12 @@ int main(int argc, char *argv[]){
             // Pushes the last few instructions through the pipeline
             id_exe_old = id_exe_new;
             while(cooldown < 3){
+                clock_cycles += 1;
                 if(cooldown < 1){
+                    num_instr_executed += 1;
                     exe_mem_old = exe_mem_new;
                     exe_mem_new = _exe(id_exe_old, &exe_mem_old, &mem_wb_new);
+                    if((unsigned int)exe_mem_new.op_code == 10){num_nop += 1;}
                 }
                 if(cooldown < 2){
                     mem_wb_old = mem_wb_new;
@@ -199,9 +211,9 @@ int main(int argc, char *argv[]){
             }
     }
     
-/*
-    printf("IC = %f\n C = %f\n Ratio = %f\n", IC, C, (8*IC)/C);
-*/
+    printf("\nNumber of clock cycles: %d\n", clock_cycles);
+    printf("\nNumber of instructions executed: %d\n", num_instr_executed);
+    printf("\nNumber of nop's: %d\n", num_nop);
     free(data_segment);
     free(kernal_segment);
     free(text_segment);
@@ -379,7 +391,7 @@ void load_text(char* token, int *index){
                 instruction.label = string_addresses[allocated];
             }
             else{
-            instruction.label = (((mem_word) strtol(instr, (char **)NULL, 16)) - DATA_START);
+                instruction.label = (((mem_word) strtol(instr, (char **)NULL, 16)) - DATA_START);
             }
         }
         else {
@@ -528,12 +540,14 @@ char read_mem(mem_addr address){
     }
 }
 
-/*Description: Read memory from the text_segment.
-      Params: address - address to read from
-      Returns: insrtuction - returns the contents
+/*
+      Description: Reads an instruction from memory.
+      Params: address - address to read from, to_run - signaling last instruction
+      Returns: if_id fetched - latch from fetch
 */
 struct if_id _if(mem_addr *address, int *to_run){
     struct if_id fetched;
+    // Fetch and check to see if this instruction is out of bounds, if so we know we are at end of file
     if((*address <  TEXT_TOP) && (*address >= TEXT_START) && ((*address - TEXT_START) <= instruction_count)){
         fetched.instr = text_segment[(*address - TEXT_START)];
         *address += 1;
@@ -572,10 +586,13 @@ void write_mem(mem_addr address, char *value){
     }
 }
 
-/*Description: Decodes an instruction.
-  Params: instruction to_decode - that was stored in memory
-  Returns: struct instruction_container - container with the correct
-  		   instruction inside.
+/*
+      Description: Decoded an instruction fetched from memory.
+      Params: if_id to_decode - latch containing instruction
+              mem_addr *pc - need the pc so we can branch
+              exe_mem *exe_new - exe latch from prev clock cycle
+              mem_wb *mem_new - mem_wb latch containing memory access from prev cycle
+      Returns: id_exe decoded - latch with decoded instruction
 */
 struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new, struct mem_wb *mem_new){
     struct instruction_container instruction;
@@ -640,7 +657,7 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new,
         instruction.type = 1;
         decoded.instruction = instruction;
     }
-
+    // Hazard control for decode stage
     switch((unsigned int) op_code){
         case 0:
             // ADDI Hazard where the source register is being written this clock cycle
@@ -740,17 +757,6 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new,
                 decoded.op_a = (*mem_new).ALU_out;
             }
             break;
-        /*case 0:
-            break; 
-        case 0:
-            break; 
-        case 0:
-            break; 
-        case 0:
-            break; 
-        case 0:
-            break; 
-*/
         }
     
     /*
@@ -784,6 +790,13 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new,
     // Return the id_exe latch
     return decoded;
 }
+/*
+      Description: Executed an instruction from the decode latch
+      Params: id_exe to_execute - latch containing values of the instruction to be executed
+              exe_mem *old - values from the prev execution, may cause hazards without
+              mem_wb *new - values from the prev clock cycles, values will be written this CC
+      Returns: exe_mem exe_latch - latch with values from execution
+*/
 struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb *new){
         unsigned int op_code;
         struct exe_mem exe_latch;
@@ -792,12 +805,20 @@ struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb
         if(type == 2) op_code = to_execute.instruction.type2.op_code;
         if(type == 3) op_code = to_execute.instruction.type3.op_code;
         exe_latch.op_code = op_code;
+        // We need to clear this value for instructions that don't use it
+        // if we don't we get values being written back to registers we don't want
         if((unsigned int) op_code == 4 || (unsigned int) op_code == 2 || (unsigned int) op_code == 1 
                     || (unsigned int) op_code == 3 || (unsigned int) op_code == 10){
             exe_latch.r_dest = -1;
         }
-        printf("Op_code: %lu\n", exe_latch.op_code);
-        // AddI and SUBI MEM HAzArds
+        /*
+            We are looking for the prev execution and mem access rd to match our sd or td
+            Op coded 6 is Load byte, so we have to use the value MDR since that is from memory
+                rather than the ALU_out
+            We will be checking mem hazards first and then exe because the exe would eventualy write
+                over the value about to be store in memory
+        */
+        // ADDI and SUBI MEM HAZARDs
         if((exe_latch.op_code == 0) || (unsigned int)exe_latch.op_code == 8){
             if(to_execute.instruction.type1.r_src == (*new).reg_dest){
                 to_execute.op_a = (*new).ALU_out;
@@ -808,7 +829,6 @@ struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb
         }
         // ADD MEM HAZARD
         if((unsigned int)exe_latch.op_code == 11){
-            //printf("MEM HAZARDS\n");
             if(to_execute.instruction.type1.r_src == (*new).reg_dest){
                 to_execute.op_a = (*new).ALU_out;
                 if((*new).op_code == 6){
@@ -821,9 +841,6 @@ struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb
                     to_execute.op_b = (*new).MDR;
                 }
             }
-            /*if(REGISTER_FILE[to_execute.instruction.type1.label] != to_execute.op_b){
-                to_execute.op_b = REGISTER_FILE[to_execute.instruction.type1.label];
-            }*/
         }
         // LB MEM HAZARD
         if(exe_latch.op_code == 6){
@@ -851,72 +868,62 @@ struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb
                 to_execute.op_b= (*old).ALU_out;
             }
         }
-    /* Branches already done might or might not need this
-        if((to_execute.op_code == 3) || (unsigned int)to_execute.op_code == 4){
-            if(to_execute.instruction.type2.r_src == *new.reg_dest){
-                to_execute.op_b = *new.ALU_out;
-            }
-            if(to_execute.instruction.type1.r_dest == *new.reg_dest){
-                to_execute.op_a = *new.ALU_out;
-            }
-        }
-*/
         switch((unsigned int)op_code){
             case 0: // ADDI
                 exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, exe_latch.op_code);
-                //Destination foward
                 exe_latch.r_dest = to_execute.instruction.type1.r_dest;
-                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
                 break;
             case 5: // LA
                 // Destination
                 exe_latch.r_dest = to_execute.instruction.type2.r_target;
                 //Offset
                 exe_latch.ALU_out = to_execute.instruction.type2.label + DATA_START;
-                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out - DATA_START, exe_latch.r_dest);
                 break;
             case 6: // LB
                 // Offset for target memory address
                 exe_latch.ALU_out = to_execute.op_a + to_execute.op_b;
                 // Destionation register
                 exe_latch.r_dest = to_execute.instruction.type1.r_dest;
-                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
                 break;
             case 7: // LI
                 exe_latch.ALU_out = to_execute.instruction.type2.label;
                 exe_latch.r_dest = to_execute.instruction.type2.r_target;
-                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
                 break;
             case 8: // SUBI
                 exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, exe_latch.op_code);
-                //Destination foward
                 exe_latch.r_dest = to_execute.instruction.type1.r_dest;
-                printf("ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
                 break;
             case 9: // SYSCALL
-                printf("SYSCALL NUM: %d\n", to_execute.op_a);
                 syscall(to_execute.op_a);
                 break;
             case 11:
                 exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, 0);
                 exe_latch.r_dest = to_execute.instruction.type1.r_dest;
-                printf("IN EXE__________--ALU: %d, DEST: %d\n", exe_latch.ALU_out, exe_latch.r_dest);
                 break;
         }
         return exe_latch;
 }
-
+/*
+    Description: Access memory with instructions that need to do so.
+    Params: exe_mem to_access - contains values needed for mem access
+    returns mem_wb to_write_back - values needed for writing back to register file
+*/
 struct mem_wb _mem(struct exe_mem to_access){
     struct mem_wb to_write_back;
     to_write_back.op_code = to_access.op_code;
     to_write_back.ALU_out = to_access.ALU_out;
     to_write_back.reg_dest = to_access.r_dest;
+    //Load byte is the only instruction that needs to access the memory
     if((unsigned int) to_access.op_code == 6){
         to_write_back.MDR = read_mem(to_write_back.ALU_out);
     }
     return to_write_back;
 }
-
+/*
+    Description: Write back to the requested register
+    Params: mem_wb to_write - latch containing data used for the write back process
+    Returns: void - instruction is finished
+*/
 void  _wb(struct mem_wb to_write){
         // write backs
       switch((unsigned int) to_write.op_code){
@@ -926,7 +933,7 @@ void  _wb(struct mem_wb to_write){
         case 5:
             REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
             break;
-        case 6:
+        case 6: // We write back MDR because that is the value from memory
             REGISTER_FILE[to_write.reg_dest] = to_write.MDR;
             break;
         case 7:
@@ -948,7 +955,6 @@ void  _wb(struct mem_wb to_write){
 int alu(int op_a, int op_b, int op_code){
 	// Addi
     if(op_code == 0){
-        printf("Op a: %d, Op b: %d\n", op_a, op_b);
         return (op_a + op_b);
     }
     // Check if equals 0
@@ -972,9 +978,8 @@ int alu(int op_a, int op_b, int op_code){
         }
         else return -1;
     }
-    // Sub
+    // Subi
     if(op_code == 8){
-        printf("Op A: %d\n", op_a);
         return (op_a - op_b);
     }
     return -1;
@@ -999,12 +1004,15 @@ int syscall(mem_word function){
         int index  = (REGISTER_FILE[0] - DATA_START);
         printf("%s\n", data_segment + index);
     }
-    return 0;
     // Exit code
     if(function == 9){
         return 9;
     }
-    
+    // Prints a register value
+    if(function == 6){
+        printf("Register %d is: %d\n", REGISTER_FILE[0], REGISTER_FILE[REGISTER_FILE[0]]);
+    }
+    return 0;
 }
 
 /*Description: Checks to see if the string name has been allocated.

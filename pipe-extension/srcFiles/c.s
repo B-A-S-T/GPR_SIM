@@ -18,3 +18,7 @@ nop
 
 add $4, $0, $1
 
+li $0, 4
+nop
+nop
+syscall 6
