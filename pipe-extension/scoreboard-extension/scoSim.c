@@ -20,7 +20,10 @@
 typedef int32_t mem_addr;
 typedef int32_t mem_word;
 typedef int32_t instruction;
+typedef int bool;
 
+#define true 1
+#define false 0
 #define MAX_SEG_SIZE 33554428
 #define NUM_STRINGS 10
 #define STRING_SIZE 100
@@ -86,28 +89,25 @@ struct instruction_container{
 
 /*Scoreboard needed DataStructures*/
 struct func_status {
-    bool busy;
-    unsigned int op;
-    unsigned int dest;
-    unsigned int src1;
-    unsigned int src2;
-    unsigned int FuSrc1;
-    unsigned int FuSrc2;
-    bool src1_ready;
-    bool src2_ready;     
+    bool busy[5];
+    unsigned int op[5];
+    unsigned int dest[5];
+    unsigned int src1[5];
+    unsigned int src2[5];
+    unsigned int FuSrc1[5];
+    unsigned int FuSrc2[5];
+    bool src1_ready[5];
+    bool src2_ready[5];     
 };
 
 struct instr_status{
 
 };
+struct reg_status{
+    int f_reg_status[FLOAT_REG_NUM];
+    int r_reg_status[INT_REG_NUM];
 
-struct R_reg_status{
-    unsigned int FU[INT_REG_NUM];
-};
-
-struct F_reg_status{
-    unsigned int FU[FLOAT_REG_NUM];
-};
+}
 /*
     Scoreboard holds all data structures.
 */
@@ -118,6 +118,12 @@ struct Scoreboard{
     struct F_reg_status;
 };
 
+struct fetch_buf{
+    struct instruction_container integer;
+    struct instruction_container f_add;
+    struct instruction_container f_mul;
+    struct instruction_container load;
+}
 
 /* Prototypes */
 void make_memory();
@@ -150,6 +156,7 @@ int main(int argc, char *argv[]){
 
     //Scoreboards
     struct scoreboard scob_new, scob_old;
+    struct fetch_buf fetch_buffer;
     bool running = true;
     int clock_cycles = 0;
     mem_addr pc = TEXT_START; // PC
@@ -161,7 +168,7 @@ int main(int argc, char *argv[]){
         scob_old = &scob_new;
         
     //Instruction issue 
-    instruction_issue(pc, scob_old);
+    instruction_issue(pc, scob_old, &fetch_buffer);
 
 
 
@@ -249,6 +256,96 @@ int main(int argc, char *argv[]){
     free(kernal_segment);
     free(text_segment);
     return 0;
+}
+
+void instruction_issue(mem_addr pc, struct scoreboard scob_old, struct fetch_buf *fetch_buffer){
+    instruction_container instr_decoded;
+    instruction instr_fetched = fetch(&pc, 1);
+    unsigned int op;
+    mem_word reg_dest;
+    instr_decoded = decode(instr_fetched);
+    //OP code
+    if(instr_decoded.type == 1){op = instr_decoded.type1;}
+    if(instr_decoded.type == 2){op = instr_decoded.type2;}
+    if(instr_decoded.type == 3){op = instr_decoded.type3;}
+    //REG_Dest 
+    if(instr_decoded.type == 1){reg_dest = instr_decoded.type1.r_dest;}
+    if(instr_decoded.type == 2){reg_dest = instr_decoded.type2.r_target;}
+    
+    if(check_struct(scob_old.func_status, op) == true){
+        printf("Stalling! \n");
+        pc -= 1;
+        return false;
+    }
+    if(check_waw(scob_old.reg_staus, reg_dest) == true){
+        printf("Stalling! \n");
+        pc -= 1;
+        return false;
+    }
+    set_fetch_buffer(&fetch_buffer, instr_decoded);
+    return true;
+}
+    
+void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr){
+    if(op < 12 && op >= 0){
+        // 0 is integer unit
+        *buf.integer = instr;
+    }
+    //Fpoint add and sub
+    if(op == 12 || op == 14){
+        *buf.f_add = instr;
+    }
+    // Fmult
+    if(op == 13){
+        *buf.f_mult = instr;
+    }
+    // LOAD/STORE
+    if(op == 15 || op == 16){
+        *buf.load = instr;
+    }
+}
+check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f){
+    // r_or_f tells whether the register is a float or integer, a float will never write to integer register 
+    // 0 if integer, 1 if float
+    //Store -1 when not in use
+    if(reg_status.r_reg_status[reg_dest] != -1 && r_or_f == 0){
+        return true;
+    }
+    //Stored -1 in reg_status when not in use
+    if(reg_status.f_reg_status[reg_dest] != -1 && r_or_f == 1){
+        return true;
+    }
+    return true;
+}
+
+bool check_struc(func_status fu_status, unsigned int op){
+    int i = 0;
+    //All using integer unit
+    if(op < 12 && op >= 0){
+        // 0 is integer unit
+        if(fu_status.busy[0] == true){
+            return true; 
+        }
+    }
+    //Fpoint add and sub
+    if(op == 12 || op == 14){
+        if(fu_status.busy[1] == true){
+            return true; 
+        }
+    }
+    // Fmult
+    if(op == 13){
+        if(fu_status.busy[2] == true){
+            return true; 
+        }
+    }
+    // LOAD/STORE
+    if(op == 15 || op == 16){
+        if(fu_status.busy[3] == true){
+            return true; 
+        }
+    }
+    return false;
 }
 
 /*Description: Creates memory for the memory segments.
@@ -581,11 +678,11 @@ char read_mem(mem_addr address){
       Params: address - address to read from, to_run - signaling last instruction
       Returns: if_id fetched - latch from fetch
 */
-struct if_id _if(mem_addr *address, int *to_run){
-    struct if_id fetched;
+instruction fetch(mem_addr *address, int *to_run){
+    instruction fetched;
     // Fetch and check to see if this instruction is out of bounds, if so we know we are at end of file
     if((*address <  TEXT_TOP) && (*address >= TEXT_START) && ((*address - TEXT_START) <= instruction_count)){
-        fetched.instr = text_segment[(*address - TEXT_START)];
+        fetched = text_segment[(*address - TEXT_START)];
         *address += 1;
         return fetched;
     }
@@ -630,9 +727,8 @@ void write_mem(mem_addr address, char *value){
               mem_wb *mem_new - mem_wb latch containing memory access from prev cycle
       Returns: id_exe decoded - latch with decoded instruction
 */
-struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new, struct mem_wb *mem_new){
+struct instruction_container _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new, struct mem_wb *mem_new){
     struct instruction_container instruction;
-    struct id_exe decoded;
     unsigned int op_code = (to_decode.instr >> 28) & 0x0000000f;
     mem_word dest;
     mem_word src;
@@ -647,8 +743,8 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new,
         instruction.type1.r_src = src;
         instruction.type1.label = (to_decode.instr & 0x0003ffff);
         instruction.type = 1;
-        decoded.instruction = instruction;
         // ADD needs the values in two registers
+        /*
         if((unsigned int) op_code == 11){
             decoded.op_a = REGISTER_FILE[instruction.type1.r_src];
             decoded.op_b = REGISTER_FILE[instruction.type1.label];
@@ -664,6 +760,7 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new,
             decoded.op_a = REGISTER_FILE[instruction.type1.r_src];
             decoded.op_b = instruction.type1.label;
         }
+        */
     }
     // Type 2
     else if((op_code == 2) || (op_code ==5) || (op_code == 7)){
@@ -672,134 +769,32 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new,
         instruction.type2.r_target = dest;
         instruction.type2.label = (to_decode.instr & 0x0007ffff);
         instruction.type = 2;
-        decoded.instruction = instruction;
         // BEQZ needs the value out of one register
+        /*
         if(op_code == 2){
             decoded.op_a = REGISTER_FILE[instruction.type2.r_target];
         }
+        */
     }
     // Type3
     else if((op_code == 1) || (op_code == 9)){
         instruction.type3.op_code = (mem_word) op_code;
         instruction.type3.label = (mem_word) (to_decode.instr & 0x0fffffff);
         instruction.type = 3;
-        decoded.instruction = instruction;
         //Branch label or System call 
-        decoded.op_a = instruction.type3.label;
+       // decoded.op_a = instruction.type3.label;
     }
     //NOP
     else if((unsigned int) op_code == 10){
         instruction.type1.op_code = (mem_word) op_code;
         instruction.type = 1;
-        decoded.instruction = instruction;
     }
-    // Hazard control for decode stage
-    switch((unsigned int) op_code){
-        case 0:
-            // ADDI Hazard where the source register is being written this clock cycle
-            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
-                decoded.op_a = (*mem_new).ALU_out;
-                // LB reads from memory so we have to use MDR instead of ALU_OUT
-                if((*mem_new).op_code == 6){
-                    decoded.op_a = (*mem_new).MDR;
-                }
-            }
-            break; 
-        case 2:
-            // BEQZ Hazard where the target is to be written this clock cycle
-            if(decoded.instruction.type2.r_target == (*mem_new).reg_dest){
-                decoded.op_a = (*mem_new).ALU_out;
-                if((*mem_new).op_code == 6){
-                    decoded.op_a = (*mem_new).MDR;
-                }
-            }
-            // Hazard where the target was calculated last clock cycle cycle in exe
-            if(decoded.instruction.type2.r_target == (*exe_new).r_dest){
-                decoded.op_a = (*exe_new).ALU_out;
-            }
-            break; 
-        case 3:
-            // BGE Hazard where the src or dest is to be written this clock cycle
-            if(decoded.instruction.type1.r_dest == (*mem_new).reg_dest){
-                decoded.op_a = (*mem_new).ALU_out;
-                if((*mem_new).op_code == 6){
-                    decoded.op_a = (*mem_new).MDR;
-                }
-            }
-            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
-                decoded.op_b = (*mem_new).ALU_out;
-                if((*mem_new).op_code == 6){
-                    decoded.op_a = (*mem_new).MDR;
-                }
-            }
-            // Hazard where the src or dest was calculated last clock cycle in exe
-            if(decoded.instruction.type1.r_dest == (*exe_new).r_dest){
-                decoded.op_a = (*exe_new).ALU_out;
-            }
-            if(decoded.instruction.type1.r_src == (*exe_new).r_dest){
-                decoded.op_b = (*exe_new).ALU_out;
-            }
-            break; 
-        case 4:
-            // BNE Hazard where the src or dest is to be written this clock cycle
-            if(decoded.instruction.type1.r_dest == (*mem_new).reg_dest){
-                decoded.op_a = (*mem_new).ALU_out;
-                if((*mem_new).op_code == 6){
-                    decoded.op_a = (*mem_new).MDR;
-                }
-            }
-            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
-                decoded.op_b = (*mem_new).ALU_out;
-                if((*mem_new).op_code == 6){
-                    decoded.op_b = (*mem_new).MDR;
-                }
-            }
-            // Hazard where the src or dest was calcuated last clock cycle in exe
-            if(decoded.instruction.type1.r_dest == (*exe_new).r_dest){
-                decoded.op_a = (*exe_new).ALU_out;
-            }
-            if(decoded.instruction.type1.r_src == (*exe_new).r_dest){
-                decoded.op_b = (*exe_new).ALU_out;
-            }
-            break; 
-        case 8:
-            // SUB source register is to be written this clock cycle
-            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
-                decoded.op_a = (*mem_new).ALU_out;
-                if((*mem_new).op_code == 6){
-                    decoded.op_a = (*mem_new).MDR;
-                }
-            }
-            break; 
-        case 11:
-            // ADD source or destination register is to be written this clock cycle
-            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
-                decoded.op_a = (*mem_new).ALU_out;
-                if((*mem_new).op_code == 6){
-                    decoded.op_a = (*mem_new).MDR;
-                }
-            }
-            if(decoded.instruction.type1.label == (*mem_new).reg_dest){
-                decoded.op_b = (*mem_new).ALU_out;
-                if((*mem_new).op_code == 6){
-                    decoded.op_b = (*mem_new).MDR;
-                }
-            }
-            break;
-        case 6:
-            // LB the source register is to be written to this clock cycle
-            if(decoded.instruction.type1.r_src == (*mem_new).reg_dest){
-                // Grab the value out of that will be loaded into that register
-                decoded.op_a = (*mem_new).ALU_out;
-            }
-            break;
-        }
-    
     /*
         Branches will start here.
         We have to update branches in the Decode stage.
     */
     // Unconditional Branch
+    /*
     if(op_code == 1){
         *pc = TEXT_START + decoded.op_a;
         *pc += 1;
@@ -823,8 +818,8 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new,
             }
         }
     }
-    // Return the id_exe latch
-    return decoded;
+    */
+    return instruction;
 }
 /*
       Description: Executed an instruction from the decode latch
