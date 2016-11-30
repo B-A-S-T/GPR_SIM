@@ -51,7 +51,6 @@ int top_string_mem = 1500;
 char string_allocation[NUM_STRINGS][STRING_SIZE]; // Keeping up with Allocation
 int string_addresses[NUM_STRINGS];
 int string_lengths[NUM_STRINGS];
-mem_word REGISTER_FILE[NUM_REGISTERS]; // Keeping up with Registers
 int instruction_count; // number of instructions
 
 /*
@@ -89,15 +88,15 @@ struct instruction_container{
 
 /*Scoreboard needed DataStructures*/
 struct func_status {
-    bool busy[5];
-    unsigned int op[5];
-    int dest[5];
-    int src1[5];
-    int src2[5];
-    int Fu_src1[5];
-    int Fu_src2[5];
-    bool src1_ready[5];
-    bool src2_ready[5];     
+    bool busy;
+    unsigned int op;
+    int dest;
+    int src1;
+    int src2;
+    int Fu_src1;
+    int Fu_src2;
+    bool src1_ready;
+    bool src2_ready;     
 };
 
 struct instr_status{
@@ -107,15 +106,14 @@ struct reg_status{
     int f_reg_status[FLOAT_REG_NUM];
     int r_reg_status[INT_REG_NUM];
 
-}
+};
 /*
     Scoreboard holds all data structures.
 */
 struct Scoreboard{
-    struct func_status[5];
-    struct instr_status;
-    struct R_reg_status;
-    struct F_reg_status;
+    struct func_status func_status[4];
+    struct instr_status instr_status;
+    struct reg_status reg_status;
 };
 
 struct fetch_buf{
@@ -123,7 +121,7 @@ struct fetch_buf{
     struct instruction_container f_add;
     struct instruction_container f_mul;
     struct instruction_container load;
-}
+};
 
 /* Prototypes */
 void make_memory();
@@ -147,6 +145,13 @@ struct id_exe _id(struct if_id to_decode, mem_addr *pc, struct exe_mem *exe_new,
 struct exe_mem _exe(struct id_exe to_execute, struct exe_mem *old, struct mem_wb *new);
 struct mem_wb _mem(struct exe_mem to_access);
 void _wb(struct mem_wb to_write);
+//New functions
+void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op);
+unsigned int get_src_fu(struct reg_status reg_status, unsigned int reg, unsigned int f_or_w);
+void instruction_issue(mem_addr pc, struct scoreboard scob_old, struct fetch_buf *fetch_buffer);
+void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr);
+bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f);
+bool check_struc(struct func_status fu_status, unsigned int op);
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
@@ -155,7 +160,8 @@ int main(int argc, char *argv[]){
     float float_reg_file[FLOAT_REG_NUM];
 
     //Scoreboards
-    struct scoreboard scob_new, scob_old;
+    struct scoreboard scob_new;
+    struct scoreboard scob_old;
     struct fetch_buf fetch_buffer;
     bool running = true;
     int clock_cycles = 0;
@@ -258,67 +264,105 @@ int main(int argc, char *argv[]){
     return 0;
 }
 
-void scoreBoard_issue(struct scoreboard scob, struct instruction_container instruction, unsigned int op){
+void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op){
     int type = instruction.type;
     
+    //Issue the Instructions that use Integer FU
     if(op < 12 && op >= 0){
         if(type == 1){
-            scob.func_status.busy[0] = true;
-            scob.func_status.op[0] = op;
-            scob.func_status.dest[0] = instruction.type1.r_dest;
-            scob.func_status.src1[0] = instruction.type1.r_src;
-            scob.func_status.src2[0] = instruction.type1.label;
-            scob.func_status.Fu_src1[0] = get_src_fu(scoreboard.reg_status, scob.func_status.Fu_src1[0], 0);
-            scob.func_status.Fu_src2[0] = get_src_fu(scoreboard.reg_status, scob.func_status.Fu_src2[0], 0);
-            scob.func_status.src1_ready[0] = check_waw(scoreboard.reg_status, scob.func_status.src1[0], 0);
-            scob.func_status.src2_ready[0] = check_waw(scoreboard.reg_status, scob.func_status.src2[0], 0);
+            scob.func_status[0].busy = true;
+            scob.func_status[0].op = op;
+            scob.func_status[0].dest = instruction.type1.r_dest;
+            scob.func_status[0].src1 = instruction.type1.r_src;
+            scob.func_status[0].src2 = instruction.type1.label;
+            scob.func_status[0].Fu_src1 = get_src_fu(scoreboard.reg_status, scob.func_status[0].Fu_src1, 0);
+            scob.func_status[0].Fu_src2 = get_src_fu(scoreboard.reg_status, scob.func_status[0].Fu_src2, 0);
+            scob.func_status[0].src1_ready = check_waw(scoreboard.reg_status, scob.func_status[0].src1, 0);
+            scob.func_status[0].src2_ready = check_waw(scoreboard.reg_status, scob.func_status[0].src2, 0);
+        }
+        if(type == 2){
+            scob.func_status[0].busy = true;
+            scob.func_status[0].op = op;
+            scob.func_status[0].dest = instruction.type2.r_target;
+            scob.func_status[0].src1 = instruction.type1.label;
+            scob.func_status[0].src2 = -1;
+            scob.func_status[0].Fu_src1 = get_src_fu(scoreboard.reg_status, scob.func_status[0].Fu_src1, 0);
+            scob.func_status[0].Fu_src2 = -1;
+            scob.func_status[0].src1_ready = check_waw(scoreboard.reg_status, scob.func_status[0].src1, 0);
+            scob.func_status[0].src2_ready = true;
         }
     }
-
-
+    //Issue the instructions that use the FLOAT ADDER and MULT
+    if(op <=14  && op > 11){
+        // Only type 1 instructions for FLOAT  
+        scob.func_status[1].busy = true;
+        scob.func_status[1].op = op;
+        scob.func_status[1].dest = instruction.type1.r_dest;
+        scob.func_status[1].src1 = instruction.type1.r_src;
+        scob.func_status[1].src2 = instruction.type1.label;
+        scob.func_status[1].Fu_src1 = get_src_fu(scoreboard.reg_status, scob.func_status[1].Fu_src1, 1);
+        scob.func_status[1].Fu_src2 = get_src_fu(scoreboard.reg_status, scob.func_status[1].Fu_src2, 1);
+        scob.func_status[1].src1_ready = check_waw(scoreboard.reg_status, scob.func_status[1].src1, 1);
+        scob.func_status[1].src2_ready = check_waw(scoreboard.reg_status, scob.func_status[1].src2, 1);
+    }
 }
 
 
 unsigned int get_src_fu(struct reg_status reg_status, unsigned int reg, unsigned int f_or_w){
+    // Integer register
     if(r_or_f == 0){
         return reg_status.r_reg_status[reg];
     }
-    //Stored -1 in reg_status when not in use
+    // Floating Registers
     if(r_or_f == 1){
         return reg_status.f_reg_status[reg];
     }
     return -2;
 }
 
+/*
+    Issues instruction, ie checks for hazards and then gives to true issue method.
+    Returns true if instruction can move to next stage, false if it must stall.
+    Params: Pc - instruction pointer, scob_old - scoreboard for this clock cycle, fetch_buf - store
+    moving to another stage.
+*/
 void instruction_issue(mem_addr pc, struct scoreboard scob_old, struct fetch_buf *fetch_buffer){
     instruction_container instr_decoded;
     instruction instr_fetched = fetch(&pc, 1);
     unsigned int op;
     mem_word reg_dest;
     instr_decoded = decode(instr_fetched);
-    //OP code
+    //Get op code of instruction
     if(instr_decoded.type == 1){op = instr_decoded.type1;}
     if(instr_decoded.type == 2){op = instr_decoded.type2;}
     if(instr_decoded.type == 3){op = instr_decoded.type3;}
-    //REG_Dest 
+    // Get reg destination of instruction
     if(instr_decoded.type == 1){reg_dest = instr_decoded.type1.r_dest;}
     if(instr_decoded.type == 2){reg_dest = instr_decoded.type2.r_target;}
     
+
+    // Check to see if the FUNC UNIT is already in use
     if(check_struct(scob_old.func_status, op) == true){
         printf("Stalling! \n");
         pc -= 1;
         return false;
     }
+    // Check to see if any instructions in FUNC UNITS are writing to same dest
     if(check_waw(scob_old.reg_staus, reg_dest) == true){
         printf("Stalling! \n");
         pc -= 1;
         return false;
     }
+    // Set buffer to know which instructions are in in execution
     set_fetch_buffer(&fetch_buffer, instr_decoded);
+    //Actually update the scoreboard to show instruction is moving to execution stage
+    scoreboard_issue(&scob_old, instr_decoded, op);
+
     return true;
 }
     
 void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr){
+    // Integer
     if(op < 12 && op >= 0){
         // 0 is integer unit
         *buf.integer = instr;
@@ -336,7 +380,8 @@ void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr)
         *buf.load = instr;
     }
 }
-check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f){
+
+bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f){
     // r_or_f tells whether the register is a float or integer, a float will never write to integer register 
     // 0 if integer, 1 if float
     //Store -1 when not in use
@@ -350,30 +395,30 @@ check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f){
     return true;
 }
 
-bool check_struc(func_status fu_status, unsigned int op){
+bool check_struc(struct func_status fu_status, unsigned int op){
     int i = 0;
     //All using integer unit
     if(op < 12 && op >= 0){
         // 0 is integer unit
-        if(fu_status.busy[0] == true){
+        if(fu_status[0].busy == true){
             return true; 
         }
     }
     //Fpoint add and sub
     if(op == 12 || op == 14){
-        if(fu_status.busy[1] == true){
+        if(fu_status[1].busy == true){
             return true; 
         }
     }
     // Fmult
     if(op == 13){
-        if(fu_status.busy[2] == true){
+        if(fu_status[2].busy == true){
             return true; 
         }
     }
     // LOAD/STORE
     if(op == 15 || op == 16){
-        if(fu_status.busy[3] == true){
+        if(fu_status[3].busy == true){
             return true; 
         }
     }
