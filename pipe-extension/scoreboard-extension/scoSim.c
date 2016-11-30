@@ -91,11 +91,11 @@ struct instruction_container{
 struct func_status {
     bool busy[5];
     unsigned int op[5];
-    unsigned int dest[5];
-    unsigned int src1[5];
-    unsigned int src2[5];
-    unsigned int FuSrc1[5];
-    unsigned int FuSrc2[5];
+    int dest[5];
+    int src1[5];
+    int src2[5];
+    int Fu_src1[5];
+    int Fu_src2[5];
     bool src1_ready[5];
     bool src2_ready[5];     
 };
@@ -256,6 +256,38 @@ int main(int argc, char *argv[]){
     free(kernal_segment);
     free(text_segment);
     return 0;
+}
+
+void scoreBoard_issue(struct scoreboard scob, struct instruction_container instruction, unsigned int op){
+    int type = instruction.type;
+    
+    if(op < 12 && op >= 0){
+        if(type == 1){
+            scob.func_status.busy[0] = true;
+            scob.func_status.op[0] = op;
+            scob.func_status.dest[0] = instruction.type1.r_dest;
+            scob.func_status.src1[0] = instruction.type1.r_src;
+            scob.func_status.src2[0] = instruction.type1.label;
+            scob.func_status.Fu_src1[0] = get_src_fu(scoreboard.reg_status, scob.func_status.Fu_src1[0], 0);
+            scob.func_status.Fu_src2[0] = get_src_fu(scoreboard.reg_status, scob.func_status.Fu_src2[0], 0);
+            scob.func_status.src1_ready[0] = check_waw(scoreboard.reg_status, scob.func_status.src1[0], 0);
+            scob.func_status.src2_ready[0] = check_waw(scoreboard.reg_status, scob.func_status.src2[0], 0);
+        }
+    }
+
+
+}
+
+
+unsigned int get_src_fu(struct reg_status reg_status, unsigned int reg, unsigned int f_or_w){
+    if(r_or_f == 0){
+        return reg_status.r_reg_status[reg];
+    }
+    //Stored -1 in reg_status when not in use
+    if(r_or_f == 1){
+        return reg_status.f_reg_status[reg];
+    }
+    return -2;
 }
 
 void instruction_issue(mem_addr pc, struct scoreboard scob_old, struct fetch_buf *fetch_buffer){
