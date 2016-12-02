@@ -146,8 +146,8 @@ void _mem();
 void _wb();
 //New functions
 void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op);
-unsigned int get_src_fu(struct reg_status reg_status, unsigned int reg, unsigned int f_or_w);
-bool instruction_issue(mem_addr pc, struct scoreboard scob_old, struct fetch_buf *fetch_buffer);
+unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int f_or_w);
+bool instruction_issue(mem_addr pc, struct scoreboard *scob_old, struct fetch_buf *fetch_buffer);
 void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr, unsigned int op);
 bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f);
 bool check_struct(struct func_status fu_status, unsigned int op);
@@ -155,7 +155,7 @@ bool check_struct(struct func_status fu_status, unsigned int op);
 instruction fetch(mem_addr *address, int to_run);
 struct instruction_container decode(instruction to_decode);
 int get_fuctional_unit(unsigned int op);
-
+void init_reg(struct reg_status *reg_status);
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
@@ -174,11 +174,14 @@ int main(int argc, char *argv[]){
 
     make_memory();
     parse_source_code(argv[1]);
-    while(running){
+    init_reg(&scob_new.reg_status);
+//    while(running){
         scob_old = scob_new;
         
     //Instruction issue 
-    instruction_issue(pc, scob_old, &fetch_buffer);
+    instruction_issue(pc, &scob_old, &fetch_buffer);
+
+    instruction_issue(pc, &scob_old, &fetch_buffer);
 
 
 
@@ -195,7 +198,8 @@ int main(int argc, char *argv[]){
 
 
 
-    }
+
+ //   }
     /*
     instruction instr;
     int run = 1;
@@ -268,6 +272,16 @@ int main(int argc, char *argv[]){
     return 0;
 }
 
+void init_reg(struct reg_status *reg_status){
+    int i;
+    for(i = 0; i < INT_REG_NUM; i++){
+        reg_status->f_reg_status[i] = -1;
+    }
+    for(i = 0; i < FLOAT_REG_NUM; i++){
+        reg_status->f_reg_status[i] = -1;
+    }
+}
+
 void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op){
     int type = instruction.type;
     
@@ -279,8 +293,8 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
             scob->func_status[0].dest = instruction.type1.r_dest;
             scob->func_status[0].src1 = instruction.type1.r_src;
             scob->func_status[0].src2 = instruction.type1.label;
-            scob->func_status[0].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[0].Fu_src1, 0);
-            scob->func_status[0].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[0].Fu_src2, 0);
+            scob->func_status[0].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[0].src1, 0);
+            scob->func_status[0].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[0].src2, 0);
             scob->func_status[0].src1_ready = check_waw(scob->reg_status, scob->func_status[0].src1, 0);
             scob->func_status[0].src2_ready = check_waw(scob->reg_status, scob->func_status[0].src2, 0);
         }
@@ -288,11 +302,11 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
             scob->func_status[0].busy = true;
             scob->func_status[0].op = op;
             scob->func_status[0].dest = instruction.type2.r_target;
-            scob->func_status[0].src1 = instruction.type1.label;
+            scob->func_status[0].src1 = -1;
             scob->func_status[0].src2 = -1;
-            scob->func_status[0].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[0].Fu_src1, 0);
+            scob->func_status[0].Fu_src1 = -1;
             scob->func_status[0].Fu_src2 = -1;
-            scob->func_status[0].src1_ready = check_waw(scob->reg_status, scob->func_status[0].src1, 0);
+            scob->func_status[0].src1_ready = true;
             scob->func_status[0].src2_ready = true;
         }
     }
@@ -304,15 +318,18 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
         scob->func_status[1].dest = instruction.type1.r_dest;
         scob->func_status[1].src1 = instruction.type1.r_src;
         scob->func_status[1].src2 = instruction.type1.label;
-        scob->func_status[1].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[1].Fu_src1, 1);
-        scob->func_status[1].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[1].Fu_src2, 1);
+        scob->func_status[1].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[1].src1, 1);
+        scob->func_status[1].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[1].src2, 1);
         scob->func_status[1].src1_ready = check_waw(scob->reg_status, scob->func_status[1].src1, 1);
         scob->func_status[1].src2_ready = check_waw(scob->reg_status, scob->func_status[1].src2, 1);
     }
 }
 
 
-unsigned int get_src_fu(struct reg_status reg_status, unsigned int reg, unsigned int r_or_f){
+unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int r_or_f){
+    if(reg == -1){
+        return -1;
+    }
     // Integer register
     if(r_or_f == 0){
         return reg_status.r_reg_status[reg];
@@ -321,7 +338,7 @@ unsigned int get_src_fu(struct reg_status reg_status, unsigned int reg, unsigned
     if(r_or_f == 1){
         return reg_status.f_reg_status[reg];
     }
-    return -2;
+    return -1;
 }
 
 /*
@@ -330,7 +347,7 @@ unsigned int get_src_fu(struct reg_status reg_status, unsigned int reg, unsigned
     Params: Pc - instruction pointer, scob_old - scoreboard for this clock cycle, fetch_buf - store
     moving to another stage.
 */
-bool instruction_issue(mem_addr pc, struct scoreboard scob_old, struct fetch_buf *fetch_buffer){
+bool instruction_issue(mem_addr pc, struct scoreboard *scob_old, struct fetch_buf *fetch_buffer){
     struct instruction_container instr_decoded;
     instruction instr_fetched = fetch(&pc, 1);
     unsigned int op;
@@ -350,13 +367,13 @@ bool instruction_issue(mem_addr pc, struct scoreboard scob_old, struct fetch_buf
     
 
     // Check to see if the FUNC UNIT is already in use
-    if(check_struct(scob_old.func_status[get_functional_unit(op)], op) == true){
+    if(check_struct(scob_old->func_status[get_functional_unit(op)], op) == true){
         printf("Stalling! \n");
         pc -= 1;
         return false;
     }
     // Check to see if any instructions in FUNC UNITS are writing to same dest
-    if(check_waw(scob_old.reg_status, reg_dest, r_or_f) == true){
+    if(check_waw(scob_old->reg_status, reg_dest, r_or_f) == false){
         printf("Stalling! \n");
         pc -= 1;
         return false;
@@ -364,7 +381,7 @@ bool instruction_issue(mem_addr pc, struct scoreboard scob_old, struct fetch_buf
     // Set buffer to know which instructions are in in execution
     set_fetch_buffer(fetch_buffer, instr_decoded, op);
     //Actually update the scoreboard to show instruction is moving to execution stage
-    scoreboard_issue(&scob_old, instr_decoded, op);
+    scoreboard_issue(scob_old, instr_decoded, op);
 
     return true;
 }
@@ -394,11 +411,11 @@ bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f){
     // 0 if integer, 1 if float
     //Store -1 when not in use
     if(reg_stat.r_reg_status[reg_dest] != -1 && r_or_f == 0){
-        return true;
+        return false;
     }
     //Stored -1 in reg_status when not in use
     if(reg_stat.f_reg_status[reg_dest] != -1 && r_or_f == 1){
-        return true;
+        return false;
     }
     return true;
 }
