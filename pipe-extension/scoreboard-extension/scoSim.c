@@ -100,7 +100,11 @@ struct func_status {
 };
 
 struct instr_status{
-
+    bool waiting[4];
+    int r_stage;
+    int fadd_stage;
+    int fmult_stage;
+    int fload_stage;
 };
 struct reg_status{
     int f_reg_status[FLOAT_REG_NUM];
@@ -162,7 +166,7 @@ void _wb();
 //New functions
 void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op);
 unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int f_or_w);
-bool instruction_issue(mem_addr pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer);
+bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer);
 void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr, unsigned int op);
 bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f);
 bool check_struct(struct func_status fu_status, unsigned int op);
@@ -170,11 +174,13 @@ bool check_struct(struct func_status fu_status, unsigned int op);
 instruction fetch(mem_addr *address, int to_run);
 struct instruction_container decode(instruction to_decode);
 int get_fuctional_unit(unsigned int op);
-void init_reg(struct reg_status *reg_status);
+void init_reg(struct reg_status *reg_status, int int_reg_file[], float float_reg_file[]);
 void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_reg_file[], struct operands *operands,
-                                        struct fetch_buf fetch_buf);
-void int_execution(struct scoreboard scob_old, struct operands operands, struct output *out_new, mem_addr *pc);
-
+                                        struct fetch_buf fetch_buf, struct scoreboard *scob_new);
+void int_execution(struct scoreboard scob_old, struct operands operands, struct output *out_new, mem_addr *pc,struct scoreboard *new);
+bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_dest, int unit);
+void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf,
+                int int_regs[], float float_regs[]);
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
     //Reg files
@@ -197,24 +203,18 @@ int main(int argc, char *argv[]){
 
     make_memory();
     parse_source_code(argv[1]);
-    init_reg(&scob_new.reg_status);
-
-//    while(running){
-        scob_old = scob_new;
-        fetch_old = fetch_new;
-        
-    //Instruction issue 
-    instruction_issue(pc, scob_old, &scob_new, &fetch_new);
-    read_operands(scob_old, int_reg_file, float_reg_file, &operands, fetch_old);
-
+    init_reg(&scob_new.reg_status, int_reg_file, float_reg_file);
+    int i;
+    for(i = 0; i < 5; i++){
         scob_old = scob_new;
         fetch_old = fetch_new;
         out_old = out_new;
 
-    instruction_issue(pc, scob_old, &scob_new, &fetch_new);
-    read_operands(scob_old, int_reg_file, float_reg_file, &operands, fetch_old);
-    int_execute(scob_old, operands, &out_new, &pc);
-
+        instruction_issue(&pc, scob_old, &scob_new, &fetch_new);
+        read_operands(scob_old, int_reg_file, float_reg_file, &operands, fetch_old, &scob_new);
+        int_execution(scob_old, operands, &out_new, &pc, &scob_new);
+        write_back(scob_old, &scob_new, fetch_old, int_reg_file, float_reg_file);
+    }
 
 
 
@@ -304,26 +304,65 @@ int main(int argc, char *argv[]){
     return 0;
 }
 
-void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf){
+void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf,
+                int int_regs[], float float_regs[]){
     int i;
     for(i = 0; i < 4; i++){
-        if(scob_old.func_status[i].busy == true && i == 0){
-            scob_new->reg_status.r_reg_status[scob_old.func_status[0].dest] = -1;
-            scob_new->func_status[0].busy = false;
-            scob_new->func_status[0].busy = 100;
-            scob_new->func_status[0].dest = -1;
-            scob_new->func_status[0].src1 = -1;
-            scob_new->func_status[0].src2 = -1;
-            scob_new->func_status[0].Fu_src1 = -1;
-            scob_new->func_status[0].Fu_src2 = -1;
-            scob_new->func_status[0].src1_ready = false;
-            scob_new->func_status[0].src2_ready = false;
+        if(scob_old.func_status[i].busy == true && scob_old.instr_status.r_stage == 3){
+            if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
+                continue;
+            }
+            scob_new->reg_status.r_reg_status[scob_old.func_status[i].dest] = -1;
+            scob_new->func_status[i].busy = false;
+            scob_new->func_status[i].busy = 100;
+            scob_new->func_status[i].dest = -1;
+            scob_new->func_status[i].src1 = -1;
+            scob_new->func_status[i].src2 = -1;
+            scob_new->func_status[i].Fu_src1 = -1;
+            scob_new->func_status[i].Fu_src2 = -1;
+            scob_new->func_status[i].src1_ready = false;
+            scob_new->func_status[i].src2_ready = false;
         }
     }
 
 }
 
-void int_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc){
+bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_dest, int unit){
+    if(unit == 0){
+        if(scob_old.instr_status.r_stage == scob_new.instr_status.r_stage && (scob_old.func_status[0].src1 == reg_dest || scob_old.func_status[0].src2 == reg_dest)){
+            return true;
+
+        }
+    }
+    if(unit == 1){
+        if(scob_old.instr_status.fadd_stage == scob_new.instr_status.fadd_stage &&
+                        scob_old.func_status[1].dest == reg_dest){
+            return true;
+
+        }
+
+    }
+    if(unit == 2){
+        if(scob_old.instr_status.fmult_stage == scob_new.instr_status.fmult_stage &&
+                        scob_old.func_status[2].dest == reg_dest){
+            return true;
+
+        }
+
+    }
+    if(unit == 3){
+        if(scob_old.instr_status.fload_stage == scob_new.instr_status.fload_stage &&
+                        scob_old.func_status[3].dest == reg_dest){
+            return true;
+
+        }
+
+    }
+    return false;
+}
+void int_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
+    // Able to execute
+    if(scob_old.func_status[0].src1_ready == true && scob_old.func_status[0].src2_ready == true){
             switch((unsigned int)scob_old.func_status[0].op){
                 // Addi
                 case 0:
@@ -379,17 +418,19 @@ void int_execution(struct scoreboard scob_old, struct operands operands, struct 
                     out->integer = operands.r_opA + operands.r_opB;
                     break;
                 }
+        }
 }
 
 void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_reg_file[], struct operands *operands,
-                                        struct fetch_buf fetch_buf){
+                                        struct fetch_buf fetch_buf, struct scoreboard *scob_new){
     int i;
-    for(i = 0; i < 5; i++){
+    for(i = 0; i < 4; i++){
             //Both source registers are ready
         if(scob_old.func_status[i].src1_ready == true && scob_old.func_status[i].src2_ready == true){
             //Set them to false so it hasn't get pulled during execution next clock
-            scob_old.func_status[i].src1_ready = false;
-            scob_old.func_status[i].src2_ready = false;
+            scob_new->func_status[i].src1_ready = false;
+            scob_new->func_status[i].src2_ready = false;
+            scob_new->instr_status.r_stage = 3;
             //Need to grab operands
             switch((unsigned int)scob_old.func_status[i].op){
                 // Addi
@@ -470,12 +511,14 @@ void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_r
 
 }
 
-void init_reg(struct reg_status *reg_status){
+void init_reg(struct reg_status *reg_status, int int_reg_file[], float float_reg_file[]){
     int i;
     for(i = 0; i < INT_REG_NUM; i++){
+        int_reg_file[i] = 0;
         reg_status->r_reg_status[i] = -1;
     }
     for(i = 0; i < FLOAT_REG_NUM; i++){
+        float_reg_file[i] = 0;
         reg_status->f_reg_status[i] = -1;
     }
 }
@@ -532,6 +575,7 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
                 scob->func_status[0].src1_ready = check_waw(scob->reg_status, scob->func_status[0].src1, 0);
             }
         }
+        scob->instr_status.r_stage = 2;
     }
     //Issue the instructions that use the FLOAT ADDER and MULT
     if(op <=14  && op > 11){
@@ -545,6 +589,11 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
         scob->func_status[1].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[1].src2, 1);
         scob->func_status[1].src1_ready = check_waw(scob->reg_status, scob->func_status[1].src1, 1);
         scob->func_status[1].src2_ready = check_waw(scob->reg_status, scob->func_status[1].src2, 1);
+        if((unsigned int)op == 13){scob->instr_status.fmult_stage = 2;}
+        if((unsigned int)op == 12){scob->instr_status.fadd_stage = 2;}
+        if((unsigned int)op == 14){scob->instr_status.fadd_stage = 2;}
+        if((unsigned int)op == 15){scob->instr_status.fload_stage = 2;}
+        if((unsigned int)op == 16){scob->instr_status.fload_stage = 2;}
     }
 }
 
@@ -570,7 +619,7 @@ unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int r_or
     Params: Pc - instruction pointer, scob_old - scoreboard for this clock cycle, fetch_buf - store
     moving to another stage.
 */
-bool instruction_issue(mem_addr pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer){
+bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer){
     struct instruction_container instr_decoded;
     instruction instr_fetched = fetch(&pc, 1);
     unsigned int op;
@@ -605,7 +654,6 @@ bool instruction_issue(mem_addr pc, struct scoreboard scob_old, struct scoreboar
     set_fetch_buffer(fetch_buffer, instr_decoded, op);
     //Actually update the scoreboard to show instruction is moving to execution stage
     scoreboard_issue(scob_new, instr_decoded, op);
-
     return true;
 }
     
@@ -821,19 +869,23 @@ void load_text(char* token, int *index){
         *index += 1;
     }
     // Type 1 Instructions
-    if((op_code == 0) || (op_code == 3) || (op_code == 4) || ((unsigned int)op_code == 8) || ((unsigned int)op_code == 11)){
+    if((op_code == 0) || (op_code == 3) || (op_code == 4) || ((unsigned int)op_code == 8) || ((unsigned int)op_code == 11)||
+                (unsigned int)op_code > 11 && (unsigned int)op_code < 15){
         struct instr_type1 instruction;
         instruction.op_code = op_code;
         instr = strtok(NULL, ", ");
         instruction.r_dest = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        if((unsigned int)op_code > 11){instruction.r_dest = (mem_word) strtol(instr + 2, (char **)NULL, 10);}
         instr = strtok(NULL, ", ");
         instruction.r_src = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        if((unsigned int)op_code > 11){instruction.r_src = (mem_word) strtol(instr + 2, (char **)NULL, 10);}
         instr = strtok(NULL, ", ");
         // BGE and BNE must find the label they are to branch to
         if((op_code == 3) || (op_code == 4)){
             label_index = find_label(instr);
             instruction.label = label_index;
         }
+        else if((unsigned int)op_code > 11 && (unsigned int)op_code < 15){instruction.label = (mem_word) strtol(instr + 2, (char **)NULL, 10);}
         else if((unsigned int)op_code == 11){
         instruction.label = (mem_word) strtol(instr + 1, (char **)NULL, 10);
         }
@@ -897,7 +949,7 @@ void load_text(char* token, int *index){
         *index += 1;
     }
     // LB requires a lot of complex parsing
-    if(op_code == 6){
+    if(op_code == 6 || (unsigned int)op_code > 14){
         struct instr_type1 instruction;
         char reg[3];
         char offset[10];
@@ -906,6 +958,7 @@ void load_text(char* token, int *index){
         instruction.op_code = op_code;
         instr = strtok(NULL, ", "); // Reg_dest
         instruction.r_dest = (mem_word) strtol(instr + 1, (char **)NULL, 10);
+        if((unsigned int)op_code > 14){instruction.r_dest = (mem_word) strtol(instr + 2, (char **)NULL, 10);}
         instr = strtok(NULL, ", "); // Second half
         reg_index = strcspn(instr, "$");
         close_par_index = strcspn(instr, ")");
