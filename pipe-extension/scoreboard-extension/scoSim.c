@@ -40,7 +40,7 @@ typedef int bool;
 
 /*Global Variables:  */
 instruction* text_segment;
-char *data_segment;
+float data_segment[MAX_SEG_SIZE/4];
 mem_word *kernal_segment;
 mem_addr data_limit;
 char labels[NUM_LABELS][LABEL_SIZE]; // Keeping up with labels
@@ -130,6 +130,7 @@ struct fetch_buf{
 struct operands{
     float f_opA;
     float f_opB;
+    int offset;
     int r_opA;
     int r_opB;
     int branch;
@@ -150,7 +151,7 @@ void load_text(char* token, int *index);
 int get_opCode(char* instr);
 char read_mem(mem_addr address);
 void write_instr(mem_addr address, instruction instr);
-void write_mem(mem_addr address, char *value);
+void write_mem(mem_addr address, float value);
 instruction type1_create(struct instr_type1 instr);
 instruction type2_create(struct instr_type2 instr);
 instruction type3_create(struct instr_type3 instr);
@@ -178,9 +179,12 @@ void init_reg(struct reg_status *reg_status, int int_reg_file[], float float_reg
 void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_reg_file[], struct operands *operands,
                                         struct fetch_buf fetch_buf, struct scoreboard *scob_new);
 void int_execution(struct scoreboard scob_old, struct operands operands, struct output *out_new, mem_addr *pc,struct scoreboard *new);
+void fp_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new);
+void fmult_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new);
+void fload_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new);
 bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_dest, int unit);
 void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf,
-                int int_regs[], float float_regs[]);
+                int int_regs[], float float_regs[], struct output output);
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
     //Reg files
@@ -199,7 +203,8 @@ int main(int argc, char *argv[]){
     bool running = true;
     int clock_cycles = 0;
     mem_addr pc = TEXT_START; // PC
-
+    
+     
 
     make_memory();
     parse_source_code(argv[1]);
@@ -209,11 +214,13 @@ int main(int argc, char *argv[]){
         scob_old = scob_new;
         fetch_old = fetch_new;
         out_old = out_new;
-
         instruction_issue(&pc, scob_old, &scob_new, &fetch_new);
         read_operands(scob_old, int_reg_file, float_reg_file, &operands, fetch_old, &scob_new);
         int_execution(scob_old, operands, &out_new, &pc, &scob_new);
-        write_back(scob_old, &scob_new, fetch_old, int_reg_file, float_reg_file);
+        fp_execution(scob_old, operands, &out_new, &pc, &scob_new);
+        fmult_execution(scob_old, operands, &out_new, &pc, &scob_new);
+        fload_execution(scob_old, operands, &out_new, &pc, &scob_new);
+        write_back(scob_old, &scob_new, fetch_old, int_reg_file, float_reg_file, out_old);
     }
 
 
@@ -305,16 +312,35 @@ int main(int argc, char *argv[]){
 }
 
 void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf,
-                int int_regs[], float float_regs[]){
+                int int_regs[], float float_regs[], struct output output){
     int i;
     for(i = 0; i < 4; i++){
         if(scob_old.func_status[i].busy == true && scob_old.instr_status.r_stage == 3){
             if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
                 continue;
             }
-            scob_new->reg_status.r_reg_status[scob_old.func_status[i].dest] = -1;
+            // Writebacks
+            switch((unsigned int) scob_old.func_status[i].op) = output.
+                case 0;
+                    int_regs[scob_old.func_status[i].dest] = output.integer;
+                    //change reg status since we aren't using it anymore
+                    scob_new->reg_status.r_reg_status[scob_old.func_status[i].dest] = -1;
+                    break;
+                case 1;
+                    float_regs[scob_old.func_status[i].dest] = output.float_add;
+                    scob_new->reg_status.f_reg_status[scob_old.func_status[i].dest] = -1;
+                    break;
+                case 2;
+                    float_regs[scob_old.func_status[i].dest] = output.float_mult;
+                    scob_new->reg_status.f_reg_status[scob_old.func_status[i].dest] = -1;
+                    break;
+                case 3;
+                    if((unsigned int)scob_old.func_status[i].op == 16){break;}
+                    float_regs[scob_old.func_status[i].dest] = output.float_load
+                    scob_new->reg_status.f_reg_status[scob_old.func_status[i].dest] = -1;
+                    break;
+            }
             scob_new->func_status[i].busy = false;
-            scob_new->func_status[i].busy = 100;
             scob_new->func_status[i].dest = -1;
             scob_new->func_status[i].src1 = -1;
             scob_new->func_status[i].src2 = -1;
@@ -322,6 +348,7 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
             scob_new->func_status[i].Fu_src2 = -1;
             scob_new->func_status[i].src1_ready = false;
             scob_new->func_status[i].src2_ready = false;
+        
         }
     }
 
@@ -420,6 +447,40 @@ void int_execution(struct scoreboard scob_old, struct operands operands, struct 
                 }
         }
 }
+void fload_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
+    if(scob_old.func_status[3].src1_ready == true && scob_old.func_status[3].src2_ready == true){
+         switch((unsigned int)scob_old.func_status[0].op){
+            case 15:
+                mem_addr address = operands.f_opA + operands.offset;
+                out->float_load = read_mem(address);
+                break;
+            case 16:
+                out->float_load = write_mem((mem_addr) operands.offset, operands.f_opA);
+                break;
+        }
+
+    }
+}
+
+
+void fp_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
+    if(scob_old.func_status[1].src1_ready == true && scob_old.func_status[1].src2_ready == true){
+        switch((unsigned int)scob_old.func_status[0].op){
+            case 12:
+                out->float_add = operands.f_opA + operands.f_opB;
+                break;
+            case 14:
+                out->float_add = operands.f_opA - operands.f_opB;
+                break;
+        }
+    }
+}
+
+void fmult_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
+    if(scob_old.func_status[2].src1_ready == true && scob_old.func_status[2].src2_ready == true){
+                out->float_mult = operands.f_opA * operands.f_opB;
+    }
+}
 
 void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_reg_file[], struct operands *operands,
                                         struct fetch_buf fetch_buf, struct scoreboard *scob_new){
@@ -490,20 +551,32 @@ void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_r
                     operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
                     operands->r_opB = int_reg_file[scob_old.func_status[i].src2];
                     break;  
-                // 
+                // fAdd
                 case 12:
+                    operands->f_opA = float_reg_file[scob_old.func_status[i].src1];
+                    operands->f_opB = float_reg_file[scob_old.func_status[i].src2];
                     break;  
-                // 
+                // fmult
                 case 13:
+                    operands->f_opA = float_reg_file[scob_old.func_status[i].src1];
+                    operands->f_opB = float_reg_file[scob_old.func_status[i].src2];
                     break;  
-                // 
+                // fsub
                 case 14:
+                    operands->f_opA = float_reg_file[scob_old.func_status[i].src1];
+                    operands->f_opB = float_reg_file[scob_old.func_status[i].src2];
                     break;  
-                // 
+                // ld
                 case 15:
+                    operands->f_opA = int_reg_file[scob_old.func_status[i].src1];
+                    operands->offset = fetch_buf.load.type1.label;
                     break;  
-                // 
+                // sd
                 case 16:
+                    // src value to store
+                    operands->f_opA = float_reg_file[scob_old.func_status[i].dest];
+                    // offset = offset + value in integer register
+                    operands->offset = fetch_buf.load.type1.label + int_reg_file[scob_old.function[i].src1];
                     break;  
             }
         }
@@ -577,24 +650,60 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
         }
         scob->instr_status.r_stage = 2;
     }
-    //Issue the instructions that use the FLOAT ADDER and MULT
-    if(op <=14  && op > 11){
-        // Only type 1 instructions for FLOAT  
-        scob->func_status[1].busy = true;
-        scob->func_status[1].op = op;
-        scob->func_status[1].dest = instruction.type1.r_dest;
-        scob->func_status[1].src1 = instruction.type1.r_src;
-        scob->func_status[1].src2 = instruction.type1.label;
-        scob->func_status[1].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[1].src1, 1);
-        scob->func_status[1].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[1].src2, 1);
-        scob->func_status[1].src1_ready = check_waw(scob->reg_status, scob->func_status[1].src1, 1);
-        scob->func_status[1].src2_ready = check_waw(scob->reg_status, scob->func_status[1].src2, 1);
-        if((unsigned int)op == 13){scob->instr_status.fmult_stage = 2;}
-        if((unsigned int)op == 12){scob->instr_status.fadd_stage = 2;}
-        if((unsigned int)op == 14){scob->instr_status.fadd_stage = 2;}
-        if((unsigned int)op == 15){scob->instr_status.fload_stage = 2;}
-        if((unsigned int)op == 16){scob->instr_status.fload_stage = 2;}
+    //Issue the instructions that use the FLOAT ADDER and SUB
+    if((unsigned int)op == 12  && (unsigned int)op == 14){
+                // Only type 1 instructions for FLOAT  
+                scob->func_status[1].busy = true;
+                scob->func_status[1].op = op;
+                scob->func_status[1].dest = instruction.type1.r_dest;
+                scob->func_status[1].src1 = instruction.type1.r_src;
+                scob->func_status[1].src2 = instruction.type1.label;
+                scob->func_status[1].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[1].src1, 1);
+                scob->func_status[1].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[1].src2, 1);
+                scob->func_status[1].src1_ready = check_waw(scob->reg_status, scob->func_status[1].src1, 1);
+                scob->func_status[1].src2_ready = check_waw(scob->reg_status, scob->func_status[1].src2, 1);
+                scob->instr_status.fadd_stage = 2;
     }
+        // Mult
+        if((unsigned int)op == 13){
+                scob->func_status[2].busy = true;
+                scob->func_status[2].op = op;
+                scob->func_status[2].dest = instruction.type1.r_dest;
+                scob->func_status[2].src1 = instruction.type1.r_src;
+                scob->func_status[2].src2 = instruction.type1.label;
+                scob->func_status[2].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[2].src1, 1);
+                scob->func_status[2].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[2].src2, 1);
+                scob->func_status[2].src1_ready = check_waw(scob->reg_status, scob->func_status[2].src1, 1);
+                scob->func_status[2].src2_ready = check_waw(scob->reg_status, scob->func_status[2].src2, 1);
+                scob->instr_status.fmult_stage = 2;
+        }
+        //Load
+        if((unsigned int)op == 15){
+                scob->func_status[3].busy = true;
+                scob->func_status[3].op = op;
+                scob->func_status[3].dest = instruction.type1.r_dest;
+                scob->func_status[3].src1 = instruction.type1.r_src;
+                scob->func_status[3].src2 = -1;
+                scob->func_status[3].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[3].src1, 1);
+                scob->func_status[3].Fu_src2 = -1;
+                scob->func_status[3].src1_ready = check_waw(scob->reg_status, scob->func_status[3].src1, 1);
+                scob->func_status[3].src2_ready = -1;
+                scob->instr_status.fload_stage = 2;
+        }
+        // Store
+        if((unsigned int)op == 16){
+                scob->func_status[3].busy = true;
+                scob->func_status[3].op = op;
+                scob->func_status[3].dest = instruction.type1.r_src;
+                scob->func_status[3].src1 = instruction.type1.r_dest;
+                scob->func_status[3].src2 = -1;
+                scob->func_status[3].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[3].src1, 1);
+                scob->func_status[3].Fu_src2 = -1;
+                scob->func_status[3].src1_ready = check_waw(scob->reg_status, scob->func_status[3].src1, 1);
+                scob->func_status[3].src2_ready = -1;
+                scob->instr_status.fload_stage = 2;
+        }
+
 }
 
 
@@ -748,9 +857,6 @@ int get_functional_unit(unsigned int op){
 */
 void make_memory(){
 	// Calloc used to '0' all memory
-    data_segment = calloc(MAX_SEG_SIZE, 1);
-    if(data_segment == NULL)
-        exit(1);
     kernal_segment = malloc(MAX_SEG_SIZE);
     if(kernal_segment == NULL)
         exit(1);
@@ -816,11 +922,13 @@ void load_data(char* token){
 
     address = strtok(token, " \t");
     //Checking for a data of type string
-    if(strcmp(address, ".asciiz") == 0){
+    if(strcmp(address, ".float") == 0){
         address = strtok(NULL, " \t");
         addr = (mem_addr) strtol(address, (char **)NULL, 16);
         value = strtok(NULL, "\"") ;
-        write_mem(addr, value);
+        float newUm = strtof(value, NULL);
+        printf("Hey!\n\n");
+        write_mem(addr, newUm);
     }
     /* We are keeping up with the labels, add each label to table */
     else if(strcmp(address, ".label") == 0){
@@ -850,7 +958,7 @@ void load_data(char* token){
 }
 
 /*Description: Loads source code instructions into simulated text segment.
-  Params: *index - program counter incremented for next instruction entry
+  Paramsi *index - program counter incremented for next instruction entry
   Returns: void
 */
 void load_text(char* token, int *index){
@@ -972,7 +1080,6 @@ void load_text(char* token, int *index){
         write_instr(address, new_instruction);
         *index += 1;
     }
-
 }
 
 /* 
@@ -1109,9 +1216,10 @@ void write_instr(mem_addr address, instruction instr){
       Params: address - address to write to, value- string to write
       Returns: void
 */
-void write_mem(mem_addr address, char *value){
-    if((address < DATA_TOP) && (address >= DATA_START))
-        memcpy(data_segment + (address - DATA_START), value, strlen(value));
+void write_mem(mem_addr address, float value){
+    if((address < DATA_TOP) && (address >= DATA_START)){
+        data_segment[address - DATA_START] = value;
+    }
     else{
         printf("Write memowry fail:");
         return NULL;
