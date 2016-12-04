@@ -866,8 +866,8 @@ void read_operands(struct scoreboard *scob_old, int int_reg_file[], float float_
                     break;  
                 // fmult
                 case 13:
-                    operands->fmult_opA = float_reg_file[scob_old->mult_func[1].src1];
-                    operands->fmult_opB = float_reg_file[scob_old->mult_func[1].src2];
+                    operands->fmult_opA = float_reg_file[scob_old->mult_func[5].src1];
+                    operands->fmult_opB = float_reg_file[scob_old->mult_func[5].src2];
                     break;  
                 // fsub
                 case 14:
@@ -1067,7 +1067,10 @@ bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboa
     if((unsigned int) op < 12){
         r_or_f = 0;
     }
-    if((unsigned int)op == 10){goto end;}
+    if((unsigned int)op == 10){
+        performance->nop_count += 1;
+        goto end;
+    }
     // Get reg destination of instruction
     if(instr_decoded.type == 1){reg_dest = instr_decoded.type1.r_dest;}
     if(instr_decoded.type == 2){reg_dest = instr_decoded.type2.r_target;}
