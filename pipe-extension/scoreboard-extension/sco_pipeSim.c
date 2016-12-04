@@ -194,7 +194,7 @@ instruction fetch(mem_addr *address, int *to_run);
 struct instruction_container decode(instruction to_decode);
 int get_fuctional_unit(unsigned int op);
 void init_reg(struct reg_status *reg_status, int int_reg_file[], float float_reg_file[]);
-void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_reg_file[], struct operands *operands,
+void read_operands(struct scoreboard *scob_old, int int_reg_file[], float float_reg_file[], struct operands *operands,
                                         struct fetch_buf fetch_buf, struct scoreboard *scob_new);
 void int_execution(struct scoreboard scob_old, struct operands operands, struct output *out_new, mem_addr *pc,struct scoreboard *new);
 void fp_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new);
@@ -203,8 +203,9 @@ void fload_execution(struct scoreboard scob_old, struct operands operands, struc
 bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_dest, int unit);
 void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf,
                 int int_regs[], float float_regs[], struct output output);
-void scoreboard_refresh(struct scoreboard *scob, int unit, int reg);
+void scoreboard_refresh(struct scoreboard *scob, int unit, unsigned int op, int type);
 void push_pipe(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buf);
+void init_pipe(struct scoreboard *scob);
 
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
@@ -235,14 +236,15 @@ int main(int argc, char *argv[]){
     make_memory();
     parse_source_code(argv[1]);
     init_reg(&scob_new.reg_status, int_reg_file, float_reg_file);
+    init_pipe(&scob_new);
     int i;
     while(to_run){
         scob_old = scob_new;
         fetch_old = fetch_new;
         out_old = out_new;
         instruction_issue(&pc, scob_old, &scob_new, &fetch_new, &performance, &to_run);
-        push_pipe(scob_old, &scob_new, &fetch_new)
-        read_operands(scob_old, int_reg_file, float_reg_file, &operands, fetch_old, &scob_new);
+        push_pipe(scob_old, &scob_new, &fetch_new);
+        read_operands(&scob_old, int_reg_file, float_reg_file, &operands, fetch_old, &scob_new);
         int_execution(scob_old, operands, &out_new, &pc, &scob_new);
         fp_execution(scob_old, operands, &out_new, &pc, &scob_new);
         fmult_execution(scob_old, operands, &out_new, &pc, &scob_new);
@@ -258,6 +260,38 @@ int main(int argc, char *argv[]){
     return 0;
 }
 
+void init_pipe(struct scoreboard *scob_new){
+    int i;
+    for(i = 0; i < 2; i++){
+        scob_new->int_func[i].busy = false;
+        scob_new->int_func[i].dest = -1;
+        scob_new->int_func[i].src1 = -1;
+        scob_new->int_func[i].src2 = -1;
+        scob_new->int_func[i].Fu_src1 = -1;
+        scob_new->int_func[i].Fu_src2 = -1;
+        scob_new->int_func[i].src1_ready = false;
+        scob_new->int_func[i].src2_ready = false; 
+        scob_new->add_func[i].busy = false;
+        scob_new->add_func[i].dest = -1;
+        scob_new->add_func[i].src1 = -1;
+        scob_new->add_func[i].src2 = -1;
+        scob_new->add_func[i].Fu_src1 = -1;
+        scob_new->add_func[i].Fu_src2 = -1;
+        scob_new->add_func[i].src1_ready = false;
+        scob_new->add_func[i].src2_ready = false; 
+    }
+    for(i = 0; i < 6; i++){
+        scob_new->mult_func[i].busy = false;
+        scob_new->mult_func[i].dest = -1;
+        scob_new->mult_func[i].src1 = -1;
+        scob_new->mult_func[i].src2 = -1;
+        scob_new->mult_func[i].Fu_src1 = -1;
+        scob_new->mult_func[i].Fu_src2 = -1;
+        scob_new->mult_func[i].src1_ready = false;
+        scob_new->mult_func[i].src2_ready = false; 
+    }
+
+}
 void push_pipe(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buf){
     if(scob_old.int_func[1].busy == false && scob_old.int_func[0].busy == true){
         scob_new->int_func[1] = scob_old.int_func[0];
@@ -285,39 +319,107 @@ void push_pipe(struct scoreboard scob_old, struct scoreboard *scob_new, struct f
     }
     if(scob_old.mult_func[5].busy == false){
         int i;
-        for(i = 1; i < 6; i++){
+        for(i = 5; i >= 0; i--){
+            if(i == 0 && scob_new->mult_func[0].busy == true && scob_old.mult_func[0].busy == true){
+                scob_new->mult_func[i] = scob_old.mult_func[i-1];
+                fetch_buf->f_mult[i] = fetch_buf->f_mult[i-1];
+                scob_new->mult_func[i].busy = false;
+                scob_new->mult_func[i].dest = -1;
+                scob_new->mult_func[i].src1 = -1;
+                scob_new->mult_func[i].src2 = -1;
+                scob_new->mult_func[i].Fu_src1 = -1;
+                scob_new->mult_func[i].Fu_src2 = -1;
+                scob_new->mult_func[i].src1_ready = false;
+                scob_new->mult_func[i].src2_ready = false; 
+                continue;
+            }
+            if(i == 0 && scob_new->mult_func[0].busy == true && scob_old.mult_func[0].busy != true){
+                continue;
+            }
             scob_new->mult_func[i] = scob_old.mult_func[i-1];
-            scob_new->mult_func[i-1].busy = false;
-            scob_new->mult_func[i-1].dest = -1;
-            scob_new->mult_func[i-1].src1 = -1;
-            scob_new->mult_func[i-1].src2 = -1;
-            scob_new->mult_func[i-1].Fu_src1 = -1;
-            scob_new->mult_func[i-1].Fu_src2 = -1;
-            scob_new->mult_func[i-1].src1_ready = false;
-            scob_new->mult_func[i-1].src2_ready = false; 
             fetch_buf->f_mult[i] = fetch_buf->f_mult[i-1];
         }
     }
-
-
-
-
-
-
-
 }
 
 
-void scoreboard_refresh(struct scoreboard *scob, int unit, int dest){
+void scoreboard_refresh(struct scoreboard *scob, int unit, unsigned int op, int type){
+
+        if(unit == 0){
+        if(type == 1){
+            // ADDI LB SUBI
+            if((unsigned int) op == 0 ||  (unsigned int) op == 6 || (unsigned int) op == 8){
+                scob->int_func[1].Fu_src1 = get_src_fu(scob->reg_status, scob->int_func[0].src1, 0);
+                scob->int_func[1].Fu_src2 = -1;
+                scob->int_func[1].src1_ready = check_waw(scob->reg_status, scob->int_func[0].src1, 0);
+                scob->int_func[1].src2_ready = true;
+            }
+            // BGE BNE
+            if((unsigned int) op == 3 || (unsigned int)op == 4){
+                scob->int_func[1].Fu_src1 = get_src_fu(scob->reg_status, scob->int_func[1].src1, 0);
+                scob->int_func[1].Fu_src2 = get_src_fu(scob->reg_status, scob->int_func[1].src2, 0);
+                scob->int_func[1].src1_ready = check_waw(scob->reg_status, scob->int_func[1].src1, 0);
+                scob->int_func[1].src2_ready = check_waw(scob->reg_status, scob->int_func[1].src2, 0);
+            }
+            // ADD
+            else{
+            scob->int_func[1].Fu_src1 = get_src_fu(scob->reg_status, scob->int_func[1].src1, 0);
+            scob->int_func[1].Fu_src2 = get_src_fu(scob->reg_status, scob->int_func[1].src2, 0);
+            scob->int_func[1].src1_ready = check_waw(scob->reg_status, scob->int_func[1].src1, 0);
+            scob->int_func[1].src2_ready = check_waw(scob->reg_status, scob->int_func[1].src2, 0);
+            }
+        }
+        if(type == 2){
+            scob->int_func[1].Fu_src1 = -1;
+            scob->int_func[1].Fu_src2 = -1;
+            scob->int_func[1].src1_ready = true;
+            scob->int_func[1].src2_ready = true;
+            if((unsigned int) op == 2){
+                scob->int_func[1].Fu_src1 = get_src_fu(scob->reg_status, scob->int_func[1].src1, 0);
+                scob->int_func[1].src1_ready = check_waw(scob->reg_status, scob->int_func[1].src1, 0);
+            }
+        }
+    }
+    //Issue the instructions that use the FLOAT ADDER and SUB
+    if(unit == 1){
+                // Only type 1 instructions for FLOAT  
+                scob->add_func[1].Fu_src1 = get_src_fu(scob->reg_status, scob->add_func[1].src1, 1);
+                scob->add_func[1].Fu_src2 = get_src_fu(scob->reg_status, scob->add_func[1].src2, 1);
+                scob->add_func[1].src1_ready = check_waw(scob->reg_status, scob->add_func[1].src1, 1);
+                scob->add_func[1].src2_ready = check_waw(scob->reg_status, scob->add_func[1].src2, 1);
+    }
+        // Mult
+        if(unit == 2){
+                scob->mult_func[5].Fu_src1 = get_src_fu(scob->reg_status, scob->mult_func[5].src1, 1);
+                scob->mult_func[5].Fu_src2 = get_src_fu(scob->reg_status, scob->mult_func[5].src2, 1);
+                scob->mult_func[5].src1_ready = check_waw(scob->reg_status, scob->mult_func[5].src1, 1);
+                scob->mult_func[5].src2_ready = check_waw(scob->reg_status, scob->mult_func[5].src2, 1);
+        }
+        //Load Store
+        if(unit == 3){
+                scob->load_func.Fu_src1 = get_src_fu(scob->reg_status, scob->load_func.src1, 0);
+                scob->load_func.Fu_src2 = -1;
+                scob->load_func.src1_ready = check_waw(scob->reg_status, scob->load_func.src1, 0);
+                scob->load_func.src2_ready = true;
+                if((unsigned int)op == 16){
+                    scob->load_func.Fu_src1 = get_src_fu(scob->reg_status, scob->load_func.src1, 1);
+                    scob->load_func.Fu_src2 = -1;
+                    scob->load_func.src1_ready = check_waw(scob->reg_status, scob->load_func.src1, 1);
+                    scob->load_func.src2_ready = true;
+                }
+        }
+
+/*
         if(unit == 0 && scob->func_status[3].op == 15){
-            scob->func_status[3].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[3].src1, 0);
-            scob->func_status[3].src1_ready = check_waw(scob->reg_status, scob->func_status[3].src1, 0);
+
+            scob->load_func.Fu_src1 = get_src_fu(scob->reg_status, scob->load_func.src1, 0);
+            scob->load_func.src1_ready = check_waw(scob->reg_status, scob->load_func.src1, 0);
         }
         if(unit == 1){ 
-            if((scob->func_status[2].src1 == dest) || (scob->func_status[2].src2 == dest)){
-                scob->func_status[2].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[2].src1, 2);
-                scob->func_status[2].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[2].src2, 2);
-                scob->func_status[2].src1_ready = check_waw(scob->reg_status, scob->func_status[2].src1, 2);
+            if((scob->mult_func[5].src1 == dest) || (scob->func_status[2].src2 == dest)){
+                scob->mult_func[5].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[2].src1, 2);
+                scob->mult_func[5].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[2].src2, 2);
+                scob->mult_func[5].src1_ready = check_waw(scob->reg_status, scob->func_status[2].src1, 2);
                 scob->func_status[2].src2_ready = check_waw(scob->reg_status, scob->func_status[2].src2, 2);       
             }
             if(scob->func_status[3].src1 == dest){
@@ -356,6 +458,7 @@ void scoreboard_refresh(struct scoreboard *scob, int unit, int dest){
         
         }
 
+i*/
         
 }
 void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf,
@@ -363,106 +466,107 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
     int i;
     bool update = 0;
     for(i = 0; i < 4; i++){
-        if(i == 0 && scob_old.func_status[i].busy == true && scob_old.instr_status.r_stage == 3){
+        if(i == 0 && scob_old.int_func[1].busy == true && scob_old.int_stat[1].r_stage == 3){
             //Go ahead and pass all our branches they won't write anything
-            if((unsigned int)scob_old.func_status[i].op == 1 ||(unsigned int)scob_old.func_status[i].op == 2 ||
-               (unsigned int)scob_old.func_status[i].op == 4 ||(unsigned int)scob_old.func_status[i].op == 3 ||
-               (unsigned int)scob_old.func_status[i].op == 9 ||(unsigned int)scob_old.func_status[i].op == 10){
-                scob_new->func_status[i].busy = false;
-                scob_new->func_status[i].dest = -1;
-                scob_new->func_status[i].src1 = -1;
-                scob_new->func_status[i].src2 = -1;
-                scob_new->func_status[i].Fu_src1 = -1;
-                scob_new->func_status[i].Fu_src2 = -1;
-                scob_new->func_status[i].src1_ready = false;
-                scob_new->func_status[i].src2_ready = false;
+            if((unsigned int)scob_old.int_func[1].op == 1 ||(unsigned int)scob_old.int_func[1].op == 2 ||
+               (unsigned int)scob_old.int_func[1].op == 4 ||(unsigned int)scob_old.int_func[1].op == 3 ||
+               (unsigned int)scob_old.int_func[1].op == 9 ||(unsigned int)scob_old.int_func[1].op == 10){
+                scob_new->int_func[1].busy = false;
+                scob_new->int_func[1].dest = -1;
+                scob_new->int_func[1].src1 = -1;
+                scob_new->int_func[1].src2 = -1;
+                scob_new->int_func[1].Fu_src1 = -1;
+                scob_new->int_func[1].Fu_src2 = -1;
+                scob_new->int_func[1].src1_ready = false;
+                scob_new->int_func[1].src2_ready = false;
+                scob_new->int_stat[1].r_stage = 0;
                 continue;
             }
 
             // If a war, we are going to stall
-            if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
+            if(check_war(scob_old, *scob_new, scob_old.int_func[1].dest, i) == true){
                 continue;
             }
-            printf("Integer: Now writing back to this register: %d, this value:%d\n\n", scob_old.func_status[0].dest, output.integer);
+            printf("Integer: Now writing back to this register: %d, this value:%d\n\n", scob_old.int_func[1].dest, output.integer);
             // Integer write backs
-            int_regs[scob_old.func_status[i].dest] = output.integer;
+            int_regs[scob_old.int_func[1].dest] = output.integer;
             //change reg status since we aren't using it anymore
-            scob_new->reg_status.r_reg_status[scob_old.func_status[i].dest] = -1;
-            scoreboard_refresh(scob_new, 0, scob_old.func_status[i].dest);
-            scob_new->func_status[i].busy = false;
-            scob_new->func_status[i].dest = -1;
-            scob_new->func_status[i].src1 = -1;
-            scob_new->func_status[i].src2 = -1;
-            scob_new->func_status[i].Fu_src1 = -1;
-            scob_new->func_status[i].Fu_src2 = -1;
-            scob_new->func_status[i].src1_ready = false;
-            scob_new->func_status[i].src2_ready = false;
+            scob_new->reg_status.r_reg_status[scob_old.int_func[1].dest] = -1;
+            scob_new->int_func[1].busy = false;
+            scob_new->int_func[1].dest = -1;
+            scob_new->int_func[1].src1 = -1;
+            scob_new->int_func[1].src2 = -1;
+            scob_new->int_func[1].Fu_src1 = -1;
+            scob_new->int_func[1].Fu_src2 = -1;
+            scob_new->int_func[1].src1_ready = false;
+            scob_new->int_func[1].src2_ready = false;
+            scob_new->int_stat[1].r_stage = 0;
         }
-        if(i == 1 && scob_old.func_status[i].busy == true && scob_old.instr_status.fadd_stage == 3){
-            if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
+        if(i == 1 && scob_old.add_func[1].busy == true && scob_old.add_stat[1].fadd_stage == 3){
+            if(check_war(scob_old, *scob_new, scob_old.add_func[1].dest, i) == true){
                 continue;
             }
             printf("FLoat add or sub: Now writing back to this register: %d, this value: %f\n\n"
-                                    , scob_old.func_status[1].dest, output.float_add);
+                                    , scob_old.add_func[1].dest, output.float_add);
             // Fload add write backs
-            float_regs[scob_old.func_status[i].dest] = output.float_add;
-            scob_new->reg_status.f_reg_status[scob_old.func_status[i].dest] = -1;
-            scoreboard_refresh(scob_new, 1, scob_old.func_status[i].dest);
-            scob_new->func_status[i].busy = false;
-            scob_new->func_status[i].dest = -1;
-            scob_new->func_status[i].src1 = -1;
-            scob_new->func_status[i].src2 = -1;
-            scob_new->func_status[i].Fu_src1 = -1;
-            scob_new->func_status[i].Fu_src2 = -1;
-            scob_new->func_status[i].src1_ready = false;
-            scob_new->func_status[i].src2_ready = false;
+            float_regs[scob_old.add_func[1].dest] = output.float_add;
+            scob_new->reg_status.f_reg_status[scob_old.add_func[1].dest] = -1;
+            scob_new->add_func[1].busy = false;
+            scob_new->add_func[1].dest = -1;
+            scob_new->add_func[1].src1 = -1;
+            scob_new->add_func[1].src2 = -1;
+            scob_new->add_func[1].Fu_src1 = -1;
+            scob_new->add_func[1].Fu_src2 = -1;
+            scob_new->add_func[1].src1_ready = false;
+            scob_new->add_func[1].src2_ready = false;
+            scob_new->add_stat[1].fadd_stage = 0;
         }
-        if(i == 2 && scob_old.func_status[i].busy == true && scob_old.instr_status.fmult_stage == 3){
-            if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
+        if(i == 2 && scob_old.mult_func[5].busy == true && scob_old.mult_stat[5].fmult_stage == 3){
+            if(check_war(scob_old, *scob_new, scob_old.mult_func[5].dest, i) == true){
                 continue;
             }
             printf("Mult: Now writing back to this register: %d this value: %f\n\n",
-                                 scob_old.func_status[2].dest, output.float_mult);
+                                 scob_old.mult_func[5].dest, output.float_mult);
             // Float mult write backs
-            float_regs[scob_old.func_status[i].dest] = output.float_mult;
-            scob_new->reg_status.f_reg_status[scob_old.func_status[i].dest] = -1;
-            scoreboard_refresh(scob_new, 2, scob_old.func_status[i].dest);
-            scob_new->func_status[i].busy = false;
-            scob_new->func_status[i].dest = -1;
-            scob_new->func_status[i].src1 = -1;
-            scob_new->func_status[i].src2 = -1;
-            scob_new->func_status[i].Fu_src1 = -1;
-            scob_new->func_status[i].Fu_src2 = -1;
-            scob_new->func_status[i].src1_ready = false;
-            scob_new->func_status[i].src2_ready = false;
+            float_regs[scob_old.mult_func[5].dest] = output.float_mult;
+            scob_new->reg_status.f_reg_status[scob_old.mult_func[5].dest] = -1;
+            scob_new->mult_func[5].busy = false;
+            scob_new->mult_func[5].dest = -1;
+            scob_new->mult_func[5].src1 = -1;
+            scob_new->mult_func[5].src2 = -1;
+            scob_new->mult_func[5].Fu_src1 = -1;
+            scob_new->mult_func[5].Fu_src2 = -1;
+            scob_new->mult_func[5].src1_ready = false;
+            scob_new->mult_func[5].src2_ready = false;
+            scob_new->mult_stat[5].fmult_stage = 0;
         }
-        if(i == 3 && scob_old.func_status[i].busy == true && scob_old.instr_status.fload_stage == 3){
-            if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
+        if(i == 3 && scob_old.load_func.busy == true && scob_old.load_stat.fload_stage == 3){
+            if(check_war(scob_old, *scob_new, scob_old.load_func.dest, i) == true){
                 continue;
             }
-            if(scob_old.func_status[3].time != 0){
-                scob_new->func_status[3].time -= 1;
+            if(scob_old.load_func.time != 0){
+                scob_new->load_func.time -= 1;
                 continue;
             }
             printf("Load: Now writing back to this register: %d, this value: %f\n\n", 
-                        scob_old.func_status[3].dest, output.float_load);
+                        scob_old.load_func.dest, output.float_load);
             // Float load write back sd does nothing here
-            if((unsigned int)scob_old.func_status[i].op == 16){
+            if((unsigned int)scob_old.load_func.op == 16){
             
             }
             else{
-                float_regs[scob_old.func_status[i].dest] = output.float_load;
-                scob_new->reg_status.f_reg_status[scob_old.func_status[i].dest] = -1;
-                scoreboard_refresh(scob_new, 3, scob_old.func_status[i].dest);
+                float_regs[scob_old.load_func.dest] = output.float_load;
+                scob_new->reg_status.f_reg_status[scob_old.load_func.dest] = -1;
             }
-            scob_new->func_status[i].busy = false;
-            scob_new->func_status[i].dest = -1;
-            scob_new->func_status[i].src1 = -1;
-            scob_new->func_status[i].src2 = -1;
-            scob_new->func_status[i].Fu_src1 = -1;
-            scob_new->func_status[i].Fu_src2 = -1;
-            scob_new->func_status[i].src1_ready = false;
-            scob_new->func_status[i].src2_ready = false;
+            scob_new->load_func.busy = false;
+            scob_new->load_func.dest = -1;
+            scob_new->load_func.src1 = -1;
+            scob_new->load_func.src2 = -1;
+            scob_new->load_func.Fu_src1 = -1;
+            scob_new->load_func.Fu_src2 = -1;
+            scob_new->load_func.src1_ready = false;
+            scob_new->load_func.src2_ready = false;
+            scob_new->load_stat.fload_stage = 0;
         }        
     }
 }
@@ -476,14 +580,24 @@ bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_de
     }
     if(unit == 1){
         int i;
-        for(i = 0; i < 5; i++;){
-            if(scob_old.mult_func[i].stamp < scob_old.add_func[1].stamp &&
-                        scob_old.func_status[1].dest == reg_dest){
-                return true;
+        for(i = 0; i < 5; i++){
+            // If the read is before the write
+            if(i == 5) {
+                /*if(scob_new.mult_stat[5].fmult_stage == 3) {
+                    false;
+                }
+                */
+            }
+            if(scob_old.mult_func[i].stamp < scob_old.add_func[1].stamp){
+                // if the instruction still hasn't read the src info.
+                if((scob_old.mult_func[i].src1 == reg_dest && scob_old.mult_func[i].src1_ready == true)  && (scob_old.mult_func[i].src2 == reg_dest && scob_old.mult_func[i].src2_ready == false)){
+                    return true;
+                }
             }
         }
 
     }
+/**
     if(unit == 2){
         if(scob_old.instr_status.fmult_stage == scob_new.instr_status.fmult_stage &&
                         scob_old.func_status[2].dest == reg_dest){
@@ -492,11 +606,22 @@ bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_de
         }
 
     }
+*/
     if(unit == 3){
-        if(scob_old.instr_status.fload_stage == scob_new.instr_status.fload_stage &&
-                        scob_old.func_status[3].dest == reg_dest){
-            return true;
-
+        int i;
+        for(i = 0; i < 5; i++){
+            // If the read is before the write
+            if(i == 5) {
+                if(scob_new.mult_stat[5].fmult_stage == 3) {
+                    false;
+                }
+            }
+            if(scob_old.mult_func[i].stamp < scob_old.load_func.stamp){
+                // if the instruction still hasn't read the src info.
+                if((scob_old.mult_func[i].src1 == reg_dest && scob_old.mult_func[i].src1_ready == true) &&  (scob_old.mult_func[i].src2 == reg_dest && scob_old.mult_func[i].src2_ready == false)){
+                    return true;
+                }
+            }
         }
 
     }
@@ -506,7 +631,7 @@ void int_execution(struct scoreboard scob_old, struct operands operands, struct 
     // Able to execute
     if(scob_old.int_func[1].src1_ready == true && scob_old.int_func[1].src2_ready == true 
                         && scob_old.int_func[1].busy == true){
-            printf("Integer execution going on: op code is: %lu\n\n", scob_old.func_status[1].op);
+            printf("Integer execution going on: op code is: %lu\n\n", scob_old.int_func[1].op);
             switch((unsigned int)scob_old.int_func[1].op){
                 // Addi
                 case 0:
@@ -605,44 +730,63 @@ void fmult_execution(struct scoreboard scob_old, struct operands operands, struc
     }
 }
 
-void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_reg_file[], struct operands *operands,
+void read_operands(struct scoreboard *scob_old, int int_reg_file[], float float_reg_file[], struct operands *operands,
                                         struct fetch_buf fetch_buf, struct scoreboard *scob_new){
     int i;
-    unsigned int op = 100;
+    int op = 100;
+    int type;
+    int int_read = 0;
+    int add_read = 0;
+    int mult_read = 0;
     for(i = 0; i < 4; i++){
+            type = 0;
+            if(i == 0){ 
+                op = scob_old->int_func[1].op;
+                type = fetch_buf.integer[1].type;
+            }
+            if(i == 1){ op = scob_old->add_func[1].op;}
+            if(i == 2){ op = scob_old->mult_func[5].op;}
+            if(i == 3){ op = scob_old->load_func.op;}
+            if(scob_old->int_stat[1].r_stage != 3 && int_read == 0 && i ==0){scoreboard_refresh(scob_old, i, op, type);}
+            if(scob_old->add_stat[1].fadd_stage != 3 && add_read == 0 && i ==1){scoreboard_refresh(scob_old, i, op, type);}
+            if(scob_old->mult_stat[1].fmult_stage != 3 && mult_read == 0 && i==2){scoreboard_refresh(scob_old, i, op, type);}
+            if(scob_old->load_stat.fload_stage != 3 && i == 3){scoreboard_refresh(scob_old, i, op, type);}
             //Both source registers are ready
-        if(scob_old.int_func[1].src1_ready == true && scob_old.int_func[1].src2_ready == true 
-                        && scob_old.int_func[1].busy == true){
+        if(scob_old->int_func[1].src1_ready == true && scob_old->int_func[1].src2_ready == true 
+                        && scob_old->int_func[1].busy == true && int_read ==0){
                 printf("Operands read for this unit 0\n\n", i);
             //Set them to false so it hasn't get pulled during execution next clock
                 scob_new->int_func[1].src1_ready = false;
                 scob_new->int_func[1].src2_ready = false;
                 scob_new->int_stat[1].r_stage = 3;
                 op = scob_new->int_func[1].op;
+                int_read = 1;
                 goto grab;
         }
-        if(scob_old.add_func[1].src1_ready == true && scob_old.add_func[1].src2_ready == true 
-                        && scob_old.add_func[1].busy == true){
+        if(scob_old->add_func[1].src1_ready == true && scob_old->add_func[1].src2_ready == true 
+                        && scob_old->add_func[1].busy == true && add_read ==0){
                 printf("Operands read for this unit 1\n\n", i);
             //Set them to false so it hasn't get pulled during execution next clock
                 scob_new->add_func[1].src1_ready = false;
                 scob_new->add_func[1].src2_ready = false;
                 scob_new->add_stat[1].fadd_stage = 3;
                 op = scob_new->add_func[1].op;
+                add_read = 1;
                 goto grab;
         }
-        if(scob_old.mult_func[5].src1_ready == true && scob_old.mult_func[1].src2_ready == true 
-                        && scob_old.mult_func[5].busy == true){
+        if(scob_old->mult_func[5].src1_ready == true && scob_old->mult_func[1].src2_ready == true 
+                        && scob_old->mult_func[5].busy == true && mult_read == 0){
                 printf("Operands read for this unit 2\n\n", i);
             //Set them to false so it hasn't get pulled during execution next clock
                 scob_new->mult_func[1].src1_ready = false;
                 scob_new->mult_func[1].src2_ready = false;
                 scob_new->mult_stat[1].fmult_stage = 3;
                 op = scob_new->mult_func[1].op;
+                mult_read = 1;
                 goto grab;
          }
-         if(scob_old.load_func.src1_ready == true && scob_old.load_func.src2_ready == true 
-                        && scob_old.load_func.busy == true){
+         if(scob_old->load_func.src1_ready == true && scob_old->load_func.src2_ready == true 
+                        && scob_old->load_func.busy == true && i == 3){
                 printf("Operands read for this unit 3\n\n");
             //Set them to false so it hasn't get pulled during execution next clock
                 scob_new->load_func.src1_ready = false;
@@ -657,7 +801,7 @@ void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_r
             switch((unsigned int)op){
                 // Addi
                 case 0:
-                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->r_opA = int_reg_file[scob_old->int_func[1].src1];
                     operands->r_opB = fetch_buf.integer[1].type1.label;
                     break;  
                 // B
@@ -666,19 +810,19 @@ void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_r
                     break;  
                 // BEQZ
                 case 2:
-                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->r_opA = int_reg_file[scob_old->int_func[1].src1];
                     operands->branch = fetch_buf.integer[1].type2.label;
                     break;  
                 // BGE
                 case 3:
-                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
-                    operands->r_opB = int_reg_file[scob_old.int_func[1].src2];
+                    operands->r_opA = int_reg_file[scob_old->int_func[1].src1];
+                    operands->r_opB = int_reg_file[scob_old->int_func[1].src2];
                     operands->branch = fetch_buf.integer[1].type1.label;
                     break;  
                 // BNE
                 case 4:
-                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
-                    operands->r_opB = int_reg_file[scob_old.int_func[1].src2];
+                    operands->r_opA = int_reg_file[scob_old->int_func[1].src1];
+                    operands->r_opB = int_reg_file[scob_old->int_func[1].src2];
                     operands->branch = fetch_buf.integer[1].type1.label;
                     break;  
                 // LA
@@ -687,7 +831,7 @@ void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_r
                     break;  
                 // LB
                 case 6:
-                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->r_opA = int_reg_file[scob_old->int_func[1].src1];
                     operands->r_opB = fetch_buf.integer[1].type1.label;
                     break;  
                 // LI
@@ -696,7 +840,7 @@ void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_r
                     break;  
                 // SUBI
                 case 8:
-                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->r_opA = int_reg_file[scob_old->int_func[1].src1];
                     operands->r_opB = fetch_buf.integer[1].type1.label;
                     break;  
                 // SYSCALL
@@ -709,35 +853,35 @@ void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_r
                     break;  
                 // Add 
                 case 11:
-                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
-                    operands->r_opB = int_reg_file[scob_old.int_func[1].src2];
+                    operands->r_opA = int_reg_file[scob_old->int_func[1].src1];
+                    operands->r_opB = int_reg_file[scob_old->int_func[1].src2];
                     break;  
                 // fAdd
                 case 12:
-                    operands->fadd_opA = float_reg_file[scob_old.add_func[1].src1];
-                    operands->fadd_opB = float_reg_file[scob_old.add_func[1].src2];
+                    operands->fadd_opA = float_reg_file[scob_old->add_func[1].src1];
+                    operands->fadd_opB = float_reg_file[scob_old->add_func[1].src2];
                     break;  
                 // fmult
                 case 13:
-                    operands->fmult_opA = float_reg_file[scob_old.mult_func[1].src1];
-                    operands->fmult_opB = float_reg_file[scob_old.mult_func[1].src2];
+                    operands->fmult_opA = float_reg_file[scob_old->mult_func[1].src1];
+                    operands->fmult_opB = float_reg_file[scob_old->mult_func[1].src2];
                     break;  
                 // fsub
                 case 14:
-                    operands->fadd_opA = float_reg_file[scob_old.add_func[1].src1];
-                    operands->fadd_opB = float_reg_file[scob_old.add_func[1].src2];
+                    operands->fadd_opA = float_reg_file[scob_old->add_func[1].src1];
+                    operands->fadd_opB = float_reg_file[scob_old->add_func[1].src2];
                     break;  
                 // ld
                 case 15:
-                    operands->load_A = int_reg_file[scob_old.load_func.src1];
+                    operands->load_A = int_reg_file[scob_old->load_func.src1];
                     operands->load_B = fetch_buf.load.type1.label;
                     break;  
                 // sd
                 case 16:
                     // src value to store
-                    operands->store_A = float_reg_file[scob_old.load_func.src1];
+                    operands->store_A = float_reg_file[scob_old->load_func.src1];
                     // offset = offset + value in integer register
-                    operands->load_B = fetch_buf.load.type1.label + int_reg_file[scob_old.load_func.dest];
+                    operands->load_B = fetch_buf.load.type1.label + int_reg_file[scob_old->load_func.dest];
                     break;  
             }
         end:;
@@ -757,6 +901,7 @@ void init_reg(struct reg_status *reg_status, int int_reg_file[], float float_reg
     }
 }
 
+// mode is for issue and refresh
 void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op, int count){
     int type = instruction.type;
     
@@ -812,7 +957,7 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
                 scob->int_func[0].src1_ready = check_waw(scob->reg_status, scob->int_func[0].src1, 0);
             }
         }
-        scob->reg_status.r_reg_status[scob->mult_func[0].dest] = 0;
+        scob->reg_status.r_reg_status[scob->int_func[0].dest] = 0;
         scob->int_stat[0].r_stage = 2;
     }
     //Issue the instructions that use the FLOAT ADDER and SUB
@@ -1005,13 +1150,13 @@ bool check_struct(struct scoreboard score, unsigned int op){
     }
     // Fmult
     if((unsigned int)op == 13){
-        if(score.mult_status[0].busy == true){
+        if(score.mult_func[0].busy == true){
             return true; 
         }
     }
     // LOAD/STORE
     if((unsigned int)op == 15 || (unsigned int)op == 16){
-        if(score.load_status.busy == true){
+        if(score.load_func.busy == true){
             return true; 
         }
     }
