@@ -97,6 +97,7 @@ struct func_status {
     int Fu_src2;
     bool src1_ready;
     bool src2_ready;     
+    int time;
 };
 
 struct instr_status{
@@ -134,6 +135,7 @@ struct operands{
     float fmult_opB;
     int load_A;
     int load_B;
+    float store_A;
     int r_opA;
     int r_opB;
     int branch;
@@ -146,6 +148,11 @@ struct output{
     float float_load;
 };
 
+struct performance{
+    int nop_count;
+    int clock_cycles;
+    int instruction_count;
+};
 /* Prototypes */
 void make_memory();
 void parse_source_code(char *filename);
@@ -170,7 +177,8 @@ void _wb();
 //New functions
 void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op);
 unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int f_or_w);
-bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer);
+bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer,
+                                struct performance *performance);
 void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr, unsigned int op);
 bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f);
 bool check_struct(struct func_status fu_status, unsigned int op);
@@ -208,7 +216,7 @@ int main(int argc, char *argv[]){
     int clock_cycles = 0;
     mem_addr pc = TEXT_START; // PC
     
-     
+    struct performance performance;
 
     make_memory();
     parse_source_code(argv[1]);
@@ -218,7 +226,7 @@ int main(int argc, char *argv[]){
         scob_old = scob_new;
         fetch_old = fetch_new;
         out_old = out_new;
-        instruction_issue(&pc, scob_old, &scob_new, &fetch_new);
+        instruction_issue(&pc, scob_old, &scob_new, &fetch_new, &performance);
         read_operands(scob_old, int_reg_file, float_reg_file, &operands, fetch_old, &scob_new);
         int_execution(scob_old, operands, &out_new, &pc, &scob_new);
         fp_execution(scob_old, operands, &out_new, &pc, &scob_new);
@@ -227,11 +235,9 @@ int main(int argc, char *argv[]){
         write_back(scob_old, &scob_new, fetch_old, int_reg_file, float_reg_file, out_old);
     }
 
-  /* 
-    printf("\nNumber of clock cycles: %d\n", clock_cycles);
-    printf("\nNumber of instructions executed: %d\n", num_instr_executed);
-    printf("\nNumber of nop's: %d\n", num_nop);
-    */
+    printf("\nNumber of clock cycles: %d\n", performance.clock_cycles);
+    printf("\nNumber of instructions executed: %d\n", performance.instruction_count);
+    printf("\nNumber of nop's: %d\n", performance.nop_count);
     free(kernal_segment);
     free(text_segment);
     return 0;
@@ -297,6 +303,14 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
             if((unsigned int)scob_old.func_status[i].op == 1 ||(unsigned int)scob_old.func_status[i].op == 2 ||
                (unsigned int)scob_old.func_status[i].op == 4 ||(unsigned int)scob_old.func_status[i].op == 3 ||
                (unsigned int)scob_old.func_status[i].op == 9 ||(unsigned int)scob_old.func_status[i].op == 10){
+                scob_new->func_status[i].busy = false;
+                scob_new->func_status[i].dest = -1;
+                scob_new->func_status[i].src1 = -1;
+                scob_new->func_status[i].src2 = -1;
+                scob_new->func_status[i].Fu_src1 = -1;
+                scob_new->func_status[i].Fu_src2 = -1;
+                scob_new->func_status[i].src1_ready = false;
+                scob_new->func_status[i].src2_ready = false;
                 continue;
             }
 
@@ -361,13 +375,21 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
             if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
                 continue;
             }
+            if(scob_old.func_status[3].time != 0){
+                scob_new->func_status[3].time -= 1;
+                continue;
+            }
             printf("Load: Now writing back to this register: %d, this value: %f\n\n", 
                         scob_old.func_status[3].dest, output.float_load);
             // Float load write back sd does nothing here
-            if((unsigned int)scob_old.func_status[i].op == 16){continue;}
-            float_regs[scob_old.func_status[i].dest] = output.float_load;
-            scob_new->reg_status.f_reg_status[scob_old.func_status[i].dest] = -1;
-            scoreboard_refresh(scob_new, 3, scob_old.func_status[i].dest);
+            if((unsigned int)scob_old.func_status[i].op == 16){
+            
+            }
+            else{
+                float_regs[scob_old.func_status[i].dest] = output.float_load;
+                scob_new->reg_status.f_reg_status[scob_old.func_status[i].dest] = -1;
+                scoreboard_refresh(scob_new, 3, scob_old.func_status[i].dest);
+            }
             scob_new->func_status[i].busy = false;
             scob_new->func_status[i].dest = -1;
             scob_new->func_status[i].src1 = -1;
@@ -382,10 +404,10 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
 
 bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_dest, int unit){
     if(unit == 0){
-        if(scob_old.instr_status.r_stage == scob_new.instr_status.r_stage && (scob_old.func_status[0].src1 == reg_dest || scob_old.func_status[0].src2 == reg_dest)){
-            return true;
+        //if(scob_old.instr_status.r_stage == scob_new.instr_status.r_stage && (scob_old.func_status[0].src1 == reg_dest || scob_old.func_status[0].src2 == reg_dest)){
+        //    return true;
 
-        }
+        //}
     }
     if(unit == 1){
         if(scob_old.instr_status.fadd_stage == scob_new.instr_status.fadd_stage &&
@@ -485,7 +507,7 @@ void fload_execution(struct scoreboard scob_old, struct operands operands, struc
                 out->float_load = read_mem(address + DATA_START);
                 break;
             case 16:
-                write_mem((mem_addr) operands.load_B, operands.load_A);
+                write_mem((mem_addr) operands.load_B + DATA_START, operands.store_A);
                 break;
         }
 
@@ -613,9 +635,9 @@ void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_r
                 // sd
                 case 16:
                     // src value to store
-                    operands->load_A = float_reg_file[scob_old.func_status[i].dest];
+                    operands->store_A = float_reg_file[scob_old.func_status[i].src1];
                     // offset = offset + value in integer register
-                    operands->load_B = fetch_buf.load.type1.label + int_reg_file[scob_old.func_status[i].src1];
+                    operands->load_B = fetch_buf.load.type1.label + int_reg_file[scob_old.func_status[i].dest];
                     break;  
             }
         }
@@ -733,6 +755,7 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
                 scob->func_status[3].src1_ready = check_waw(scob->reg_status, scob->func_status[3].src1, 0);
                 scob->func_status[3].src2_ready = true;
                 scob->instr_status.fload_stage = 2;
+                scob->func_status[3].time = 2;
         }
         // Store
         if((unsigned int)op == 16){
@@ -746,6 +769,7 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
                 scob->func_status[3].src1_ready = check_waw(scob->reg_status, scob->func_status[3].src1, 0);
                 scob->func_status[3].src2_ready = true;
                 scob->instr_status.fload_stage = 2;
+                scob->func_status[3].time = 2;
         }
 
 }
@@ -771,7 +795,11 @@ unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int r_or
     Params: Pc - instruction pointer, scob_old - scoreboard for this clock cycle, fetch_buf - store
     moving to another stage.
 */
-bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer){
+bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer,
+                                                struct performance *performance){
+
+    performance->clock_cycles += 1;
+
     struct instruction_container instr_decoded;
     instruction instr_fetched = fetch(pc, 1);
     unsigned int op;
@@ -806,6 +834,8 @@ bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboa
     set_fetch_buffer(fetch_buffer, instr_decoded, op);
     //Actually update the scoreboard to show instruction is moving to execution stage
     scoreboard_issue(scob_new, instr_decoded, op);
+    if(scob_new->func_status[0].op == 10){performance->nop_count += 1;}
+    performance->instruction_count += 1;
     printf("Just issued this instruction with opcode: %lu\n", op);
     return true;
 }
@@ -1140,11 +1170,11 @@ void load_text(char* token, int *index){
 */
 instruction type1_create(struct instr_type1 instr){
     instruction new_instruction = 0;
-    new_instruction = (instr.op_code << 28) | new_instruction;
+    new_instruction = (instr.op_code << 27) | new_instruction;
     if(instr.op_code == 10) return new_instruction;
-    new_instruction = (instr.r_dest << 23) | new_instruction;
-    new_instruction = (instr.r_src << 18) | new_instruction;
-    new_instruction = (instr.label & 0x001fffff) | new_instruction;
+    new_instruction = (instr.r_dest << 22) | new_instruction;
+    new_instruction = (instr.r_src << 17) | new_instruction;
+    new_instruction = (instr.label & 0x0001ffff) | new_instruction;
     return new_instruction;
 
 }
@@ -1156,9 +1186,9 @@ instruction type1_create(struct instr_type1 instr){
 */ 
 instruction type2_create(struct instr_type2 instr){
     instruction new_instruction = 0;
-    new_instruction = (instr.op_code << 28) | new_instruction;
-    new_instruction = (instr.r_target << 23) | new_instruction;
-    new_instruction = (instr.label & 0x007fffff) | new_instruction;
+    new_instruction = (instr.op_code << 27) | new_instruction;
+    new_instruction = (instr.r_target << 22) | new_instruction;
+    new_instruction = (instr.label & 0x003fffff) | new_instruction;
     return new_instruction;
 }
 
@@ -1169,8 +1199,8 @@ instruction type2_create(struct instr_type2 instr){
 */ 
 instruction type3_create(struct instr_type3 instr){
     instruction new_instruction = 0;
-    new_instruction = (instr.op_code << 28) | new_instruction;
-    new_instruction = (instr.label & 0x0fffffff) | new_instruction;
+    new_instruction = (instr.op_code << 27) | new_instruction;
+    new_instruction = (instr.label & 0x07ffffff) | new_instruction;
     return new_instruction;
 }
 
@@ -1287,7 +1317,7 @@ void write_mem(mem_addr address, float value){
 */
 struct instruction_container decode(instruction to_decode){
     struct instruction_container instruction;
-    unsigned int op_code = (to_decode >> 28) & 0x0000000f;
+    unsigned int op_code = (to_decode >> 27) & 0x0000001f;
     mem_word dest;
     mem_word src;
     mem_word label;
@@ -1296,19 +1326,19 @@ struct instruction_container decode(instruction to_decode){
             || (op_code == 4) || (op_code == 6) || ((unsigned int)op_code == 8) || ((unsigned int) op_code == 11) ||
                 ((unsigned int) op_code > 11)){
         instruction.type1.op_code = op_code;
-        dest = (to_decode >> 23) & 0x0000001f;
+        dest = (to_decode >> 22) & 0x0000001f;
         instruction.type1.r_dest = dest;
-        src =  (to_decode >> 18) & 0x0000001f;
+        src =  (to_decode >> 17) & 0x0000001f;
         instruction.type1.r_src = src;
-        instruction.type1.label = (to_decode & 0x0003ffff);
+        instruction.type1.label = (to_decode & 0x0001ffff);
         instruction.type = 1;
     }
     // Type 2
     else if((op_code == 2) || (op_code ==5) || (op_code == 7)){
         instruction.type2.op_code = op_code;
-        dest = (to_decode >> 23) & 0x0000001f;
+        dest = (to_decode >> 22) & 0x0000001f;
         instruction.type2.r_target = dest;
-        instruction.type2.label = (to_decode & 0x0007ffff);
+        instruction.type2.label = (to_decode & 0x0003ffff);
         instruction.type = 2;
         // BEQZ needs the value out of one register
         /*
@@ -1320,7 +1350,7 @@ struct instruction_container decode(instruction to_decode){
     // Type3
     else if((op_code == 1) || (op_code == 9)){
         instruction.type3.op_code = (mem_word) op_code;
-        instruction.type3.label = (mem_word) (to_decode & 0x0fffffff);
+        instruction.type3.label = (mem_word) (to_decode & 0x07ffffff);
         instruction.type = 3;
         //Branch label or System call 
        // decoded.op_a = instruction.type3.label;

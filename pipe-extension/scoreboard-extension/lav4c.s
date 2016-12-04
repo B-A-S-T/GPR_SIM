@@ -8,7 +8,7 @@
 .float 0x40000006 "0.0"
 .float 0x40000007 "0.0"
 
-.label while 0x5000000f
+.label while 0x50000010
 
 .text
 
@@ -55,6 +55,7 @@ ld $f5, ($26)
 addi $19, $19, 1
 
 bne $19, $20, while
-
+nop
+nop
 
 
