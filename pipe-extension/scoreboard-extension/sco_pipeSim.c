@@ -98,6 +98,7 @@ struct func_status {
     bool src1_ready;
     bool src2_ready;     
     int time;
+    int stamp;
 };
 
 struct instr_status{
@@ -181,7 +182,7 @@ void _exe();
 void _mem();
 void _wb();
 //New functions
-void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op);
+void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op, int count);
 unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int f_or_w);
 bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer,
                                 struct performance *performance, int *to_run);
@@ -203,6 +204,7 @@ bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_de
 void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf,
                 int int_regs[], float float_regs[], struct output output);
 void scoreboard_refresh(struct scoreboard *scob, int unit, int reg);
+void push_pipe(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buf);
 
 
 /*Main entry into simulator, one argument should be passed, the filename.*/
@@ -260,11 +262,42 @@ void push_pipe(struct scoreboard scob_old, struct scoreboard *scob_new, struct f
     if(scob_old.int_func[1].busy == false && scob_old.int_func[0].busy == true){
         scob_new->int_func[1] = scob_old.int_func[0];
         fetch_buf->integer[1] = fetch_buf->integer[0];
+        scob_new->int_func[0].busy = false;
+        scob_new->int_func[0].dest = -1;
+        scob_new->int_func[0].src1 = -1;
+        scob_new->int_func[0].src2 = -1;
+        scob_new->int_func[0].Fu_src1 = -1;
+        scob_new->int_func[0].Fu_src2 = -1;
+        scob_new->int_func[0].src1_ready = false;
+        scob_new->int_func[0].src2_ready = false; 
     }
     if(scob_old.add_func[1].busy == false && scob_old.add_func[0].busy == true){
-        scob_new->int_func[1] = scob_old.add_func[0];
+        scob_new->add_func[1] = scob_old.add_func[0];
+        fetch_buf->f_add[1] = fetch_buf->f_add[0];
+        scob_new->add_func[0].busy = false;
+        scob_new->add_func[0].dest = -1;
+        scob_new->add_func[0].src1 = -1;
+        scob_new->add_func[0].src2 = -1;
+        scob_new->add_func[0].Fu_src1 = -1;
+        scob_new->add_func[0].Fu_src2 = -1;
+        scob_new->add_func[0].src1_ready = false;
+        scob_new->add_func[0].src2_ready = false; 
     }
-
+    if(scob_old.mult_func[5].busy == false){
+        int i;
+        for(i = 1; i < 6; i++){
+            scob_new->mult_func[i] = scob_old.mult_func[i-1];
+            scob_new->mult_func[i-1].busy = false;
+            scob_new->mult_func[i-1].dest = -1;
+            scob_new->mult_func[i-1].src1 = -1;
+            scob_new->mult_func[i-1].src2 = -1;
+            scob_new->mult_func[i-1].Fu_src1 = -1;
+            scob_new->mult_func[i-1].Fu_src2 = -1;
+            scob_new->mult_func[i-1].src1_ready = false;
+            scob_new->mult_func[i-1].src2_ready = false; 
+            fetch_buf->f_mult[i] = fetch_buf->f_mult[i-1];
+        }
+    }
 
 
 
@@ -442,10 +475,12 @@ bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_de
         //}
     }
     if(unit == 1){
-        if(scob_old.instr_status.fadd_stage == scob_new.instr_status.fadd_stage &&
+        int i;
+        for(i = 0; i < 5; i++;){
+            if(scob_old.mult_func[i].stamp < scob_old.add_func[1].stamp &&
                         scob_old.func_status[1].dest == reg_dest){
-            return true;
-
+                return true;
+            }
         }
 
     }
@@ -469,10 +504,10 @@ bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_de
 }
 void int_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
     // Able to execute
-    if(scob_old.func_status[0].src1_ready == true && scob_old.func_status[0].src2_ready == true 
-                        && scob_old.func_status[0].busy == true){
-            printf("Integer execution going on: op code is: %lu\n\n", scob_old.func_status[0].op);
-            switch((unsigned int)scob_old.func_status[0].op){
+    if(scob_old.int_func[1].src1_ready == true && scob_old.int_func[1].src2_ready == true 
+                        && scob_old.int_func[1].busy == true){
+            printf("Integer execution going on: op code is: %lu\n\n", scob_old.func_status[1].op);
+            switch((unsigned int)scob_old.int_func[1].op){
                 // Addi
                 case 0:
                     out->integer = operands.r_opA + operands.r_opB;
@@ -531,9 +566,9 @@ void int_execution(struct scoreboard scob_old, struct operands operands, struct 
 }
 void fload_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
     mem_addr address;
-    if(scob_old.func_status[3].src1_ready == true && scob_old.func_status[3].src2_ready == true
-                    && scob_old.func_status[3].busy == true){
-         switch((unsigned int)scob_old.func_status[3].op){
+    if(scob_old.load_func.src1_ready == true && scob_old.load_func.src2_ready == true
+                    && scob_old.load_func.busy == true){
+         switch((unsigned int)scob_old.load_func.op){
             case 15:
                 address = operands.load_A + operands.load_B;
                 out->float_load = read_mem(address + DATA_START);
@@ -548,10 +583,10 @@ void fload_execution(struct scoreboard scob_old, struct operands operands, struc
 
 
 void fp_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
-    if(scob_old.func_status[1].src1_ready == true && scob_old.func_status[1].src2_ready == true
-                        && scob_old.func_status[1].busy == true){
+    if(scob_old.add_func[1].src1_ready == true && scob_old.add_func[1].src2_ready == true
+                        && scob_old.add_func[1].busy == true){
         printf("FAdd or Fsubb just took place\n\n");
-        switch((unsigned int)scob_old.func_status[1].op){
+        switch((unsigned int)scob_old.add_func[1].op){
             case 12:
                 out->float_add = operands.fadd_opA + operands.fadd_opB;
                 break;
@@ -563,8 +598,8 @@ void fp_execution(struct scoreboard scob_old, struct operands operands, struct o
 }
 
 void fmult_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
-    if(scob_old.func_status[2].src1_ready == true && scob_old.func_status[2].src2_ready == true
-                    && scob_old.func_status[2].busy == true){
+    if(scob_old.mult_func[5].src1_ready == true && scob_old.mult_func[5].src2_ready == true
+                    && scob_old.mult_func[5].busy == true){
             printf("Fmult just took place\n\n");
             out->float_mult = operands.fmult_opA * operands.fmult_opB;
     }
@@ -722,13 +757,14 @@ void init_reg(struct reg_status *reg_status, int int_reg_file[], float float_reg
     }
 }
 
-void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op){
+void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op, int count){
     int type = instruction.type;
     
     //Issue the Instructions that use Integer FU
     if(op < 12 && op >= 0){
             scob->int_func[0].busy = true;
             scob->int_func[0].op = op;
+            scob->int_func[0].stamp = count;
         if(type == 1){
             // ADDI LB SUBI
             if((unsigned int) op == 0 ||  (unsigned int) op == 6 || (unsigned int) op == 8){
@@ -792,7 +828,8 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
                 scob->add_func[0].Fu_src2 = get_src_fu(scob->reg_status, scob->add_func[0].src2, 1);
                 scob->add_func[0].src1_ready = check_waw(scob->reg_status, scob->add_func[0].src1, 1);
                 scob->add_func[0].src2_ready = check_waw(scob->reg_status, scob->add_func[0].src2, 1);
-                scob->add_func[0].fadd_stage = 2;
+                scob->add_stat[0].fadd_stage = 2;
+                scob->add_func[0].stamp = count;
     }
         // Mult
         if((unsigned int)op == 13){
@@ -806,7 +843,8 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
                 scob->mult_func[0].Fu_src2 = get_src_fu(scob->reg_status, scob->mult_func[0].src2, 1);
                 scob->mult_func[0].src1_ready = check_waw(scob->reg_status, scob->mult_func[0].src1, 1);
                 scob->mult_func[0].src2_ready = check_waw(scob->reg_status, scob->mult_func[0].src2, 1);
-                scob->mult_stat.fmult_stage = 2;
+                scob->mult_stat[0].fmult_stage = 2;
+                scob->mult_func[0].stamp = count;
         }
         //Load
         if((unsigned int)op == 15){
@@ -822,6 +860,7 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
                 scob->load_func.src2_ready = true;
                 scob->load_stat.fload_stage = 2;
                 scob->load_func.time = 2;
+                scob->load_func.stamp = count;
         }
         // Store
         if((unsigned int)op == 16){
@@ -836,6 +875,7 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
                 scob->load_func.src2_ready = true;
                 scob->load_stat.fload_stage = 2;
                 scob->load_func.time = 2;
+                scob->load_func.stamp = count;
         }
 
 }
@@ -899,8 +939,8 @@ bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboa
     // Set buffer to know which instructions are in in execution
     set_fetch_buffer(fetch_buffer, instr_decoded, op);
     //Actually update the scoreboard to show instruction is moving to execution stage
-    scoreboard_issue(scob_new, instr_decoded, op);
-    if(scob_new->func_status[0].op == 10){performance->nop_count += 1;}
+    scoreboard_issue(scob_new, instr_decoded, op, performance->instruction_count);
+    if((unsigned int)op == 10){performance->nop_count += 1;}
     performance->instruction_count += 1;
     printf("Just issued this instruction with opcode: %lu\n", op);
     return true;
