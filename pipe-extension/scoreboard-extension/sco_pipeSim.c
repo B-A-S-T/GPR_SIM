@@ -321,9 +321,8 @@ void push_pipe(struct scoreboard scob_old, struct scoreboard *scob_new, struct f
         int i;
         for(i = 5; i >= 0; i--){
             if(i == 0 && scob_new->mult_func[0].busy == true && scob_old.mult_func[0].busy == true){
-                scob_new->mult_func[i] = scob_old.mult_func[i-1];
-                fetch_buf->f_mult[i] = fetch_buf->f_mult[i-1];
                 scob_new->mult_func[i].busy = false;
+                scob_new->mult_func[i].op = 40;
                 scob_new->mult_func[i].dest = -1;
                 scob_new->mult_func[i].src1 = -1;
                 scob_new->mult_func[i].src2 = -1;
@@ -336,6 +335,7 @@ void push_pipe(struct scoreboard scob_old, struct scoreboard *scob_new, struct f
             if(i == 0 && scob_new->mult_func[0].busy == true && scob_old.mult_func[0].busy != true){
                 continue;
             }
+            if(i == 0){continue;}
             scob_new->mult_func[i] = scob_old.mult_func[i-1];
             fetch_buf->f_mult[i] = fetch_buf->f_mult[i-1];
         }
@@ -378,7 +378,10 @@ void scoreboard_refresh(struct scoreboard *scob, int unit, unsigned int op, int 
                 scob->int_func[1].Fu_src1 = get_src_fu(scob->reg_status, scob->int_func[1].src1, 0);
                 scob->int_func[1].src1_ready = check_waw(scob->reg_status, scob->int_func[1].src1, 0);
             }
+
         }
+        if(scob->int_func[1].src1 == scob->int_func[1].dest){scob->int_func[1].Fu_src1 = -1; scob->int_func[1].src1_ready = true;}
+        if(scob->int_func[1].src2 == scob->int_func[1].dest){scob->int_func[1].Fu_src2 = -1; scob->int_func[1].src2_ready = true;}
     }
     //Issue the instructions that use the FLOAT ADDER and SUB
     if(unit == 1){
@@ -749,7 +752,7 @@ void read_operands(struct scoreboard *scob_old, int int_reg_file[], float float_
             if(i == 3){ op = scob_old->load_func.op;}
             if(scob_old->int_stat[1].r_stage != 3 && int_read == 0 && i ==0){scoreboard_refresh(scob_old, i, op, type);}
             if(scob_old->add_stat[1].fadd_stage != 3 && add_read == 0 && i ==1){scoreboard_refresh(scob_old, i, op, type);}
-            if(scob_old->mult_stat[1].fmult_stage != 3 && mult_read == 0 && i==2){scoreboard_refresh(scob_old, i, op, type);}
+            if(scob_old->mult_stat[5].fmult_stage != 3 && mult_read == 0 && i==2){scoreboard_refresh(scob_old, i, op, type);}
             if(scob_old->load_stat.fload_stage != 3 && i == 3){scoreboard_refresh(scob_old, i, op, type);}
             //Both source registers are ready
         if(scob_old->int_func[1].src1_ready == true && scob_old->int_func[1].src2_ready == true 
@@ -774,14 +777,14 @@ void read_operands(struct scoreboard *scob_old, int int_reg_file[], float float_
                 add_read = 1;
                 goto grab;
         }
-        if(scob_old->mult_func[5].src1_ready == true && scob_old->mult_func[1].src2_ready == true 
+        if(scob_old->mult_func[5].src1_ready == true && scob_old->mult_func[5].src2_ready == true 
                         && scob_old->mult_func[5].busy == true && mult_read == 0){
                 printf("Operands read for this unit 2\n\n", i);
             //Set them to false so it hasn't get pulled during execution next clock
-                scob_new->mult_func[1].src1_ready = false;
-                scob_new->mult_func[1].src2_ready = false;
-                scob_new->mult_stat[1].fmult_stage = 3;
-                op = scob_new->mult_func[1].op;
+                scob_new->mult_func[5].src1_ready = false;
+                scob_new->mult_func[5].src2_ready = false;
+                scob_new->mult_stat[5].fmult_stage = 3;
+                op = scob_new->mult_func[5].op;
                 mult_read = 1;
                 goto grab;
          }
@@ -1064,6 +1067,7 @@ bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboa
     if((unsigned int) op < 12){
         r_or_f = 0;
     }
+    if((unsigned int)op == 10){goto end;}
     // Get reg destination of instruction
     if(instr_decoded.type == 1){reg_dest = instr_decoded.type1.r_dest;}
     if(instr_decoded.type == 2){reg_dest = instr_decoded.type2.r_target;}
@@ -1088,6 +1092,7 @@ bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboa
     if((unsigned int)op == 10){performance->nop_count += 1;}
     performance->instruction_count += 1;
     printf("Just issued this instruction with opcode: %lu\n", op);
+    end:
     return true;
 }
     
@@ -1521,7 +1526,7 @@ instruction fetch(mem_addr *address, int *to_run){
     if((*address <  TEXT_TOP) && (*address >= TEXT_START)){
         fetched = text_segment[(*address - TEXT_START)];
         printf("This is address from fetch: %d\n", (*address - TEXT_START));
-        if((*address - TEXT_START) == 31){
+        if((*address - TEXT_START) == 32){
             *to_run = 0;
         }
         *address += 1;
