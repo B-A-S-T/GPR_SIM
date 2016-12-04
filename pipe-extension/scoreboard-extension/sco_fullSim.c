@@ -1,6 +1,6 @@
 /*
   Group 1
-  Created October 2016 by Ian Thomas.
+  Created Decmeber 2016 by Ian Thomas.
 
   Using 32 bit addressing we will be able to access 4GB of data.
   4294967296 decimal and 0x100000000 hex
@@ -96,7 +96,7 @@ struct func_status {
     int Fu_src1;
     int Fu_src2;
     bool src1_ready;
-    bool src2_ready;     
+    bool src2_ready;
     int time;
 };
 
@@ -107,6 +107,7 @@ struct instr_status{
     int fmult_stage;
     int fload_stage;
 };
+
 struct reg_status{
     int f_reg_status[FLOAT_REG_NUM];
     int r_reg_status[INT_REG_NUM];
@@ -120,14 +121,19 @@ struct scoreboard{
     struct instr_status instr_status;
     struct reg_status reg_status;
 };
+/*
+  Stores each functional units instruction.
 
+*/
 struct fetch_buf{
     struct instruction_container integer;
     struct instruction_container f_add;
     struct instruction_container f_mult;
     struct instruction_container load;
 };
-
+/*
+  Operands that each functional unit has.
+*/
 struct operands{
     float fadd_opA;
     float fadd_opB;
@@ -140,14 +146,18 @@ struct operands{
     int r_opB;
     int branch;
 };
-
+/*
+  Used to be passed to the write back stage.
+*/
 struct output{
     int integer;
     float float_add;
     float float_mult;
     float float_load;
 };
-
+/*
+  Keep up with the performance of the simulator.
+*/
 struct performance{
     int nop_count;
     int clock_cycles;
@@ -166,15 +176,13 @@ instruction type1_create(struct instr_type1 instr);
 instruction type2_create(struct instr_type2 instr);
 instruction type3_create(struct instr_type3 instr);
 int find_label(char* to_search);
-int alu(int op_a, int op_b, int op_code);
 int check_allocated(char* match);
 int syscall(mem_word function);
 int get_index(int match);
-void _id();
-void _exe();
-void _mem();
-void _wb();
-//New functions
+
+/*
+  New functions used for the scoreboard
+*/
 void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op);
 unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int f_or_w);
 bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer,
@@ -197,13 +205,14 @@ bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_de
 void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf,
                 int int_regs[], float float_regs[], struct output output);
 void scoreboard_refresh(struct scoreboard *scob, int unit, int reg);
+
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
     //Reg files
     int int_reg_file[INT_REG_NUM];
     float float_reg_file[FLOAT_REG_NUM];
 
-    //Scoreboards
+    // simulator structs
     struct scoreboard scob_new;
     struct scoreboard scob_old;
     struct operands operands;
@@ -211,21 +220,23 @@ int main(int argc, char *argv[]){
     struct fetch_buf fetch_new;
     struct output out_old;
     struct output out_new;
-    
+    // used to stop sim
     int to_run = 1;
 
-    int clock_cycles = 0;
     mem_addr pc = TEXT_START; // PC
-    
-    struct performance performance;
 
+    struct performance performance; // performance
+    //init
     performance.instruction_count = 0;
     performance.nop_count = 0;
     performance.clock_cycles = 0;
+
     make_memory();
     parse_source_code(argv[1]);
+    // -1 out all reg files
     init_reg(&scob_new.reg_status, int_reg_file, float_reg_file);
     int i;
+
     while(to_run){
         scob_old = scob_new;
         fetch_old = fetch_new;
@@ -247,24 +258,31 @@ int main(int argc, char *argv[]){
     return 0;
 }
 
+/*
+  Refreshed all the values in the scoreboard so that waiting instructions can read
+    from their sources.
+*/
 void scoreboard_refresh(struct scoreboard *scob, int unit, int dest){
+        //int update
         if(unit == 0 && scob->func_status[3].op == 15){
             scob->func_status[3].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[3].src1, 0);
             scob->func_status[3].src1_ready = check_waw(scob->reg_status, scob->func_status[3].src1, 0);
         }
-        if(unit == 1){ 
+        // Fadd update
+        if(unit == 1){
             if((scob->func_status[2].src1 == dest) || (scob->func_status[2].src2 == dest)){
                 scob->func_status[2].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[2].src1, 2);
                 scob->func_status[2].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[2].src2, 2);
                 scob->func_status[2].src1_ready = check_waw(scob->reg_status, scob->func_status[2].src1, 2);
-                scob->func_status[2].src2_ready = check_waw(scob->reg_status, scob->func_status[2].src2, 2);       
+                scob->func_status[2].src2_ready = check_waw(scob->reg_status, scob->func_status[2].src2, 2);
             }
             if(scob->func_status[3].src1 == dest){
                 scob->func_status[3].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[3].src1, 0);
                 scob->func_status[3].src1_ready = check_waw(scob->reg_status, scob->func_status[3].src1, 0);
             }
-        
+
         }
+        // Fmult update
         if(unit == 2){
             if((scob->func_status[1].src1 == dest) || (scob->func_status[1].src2 == dest)){
                 scob->func_status[1].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[1].src1, 1);
@@ -272,13 +290,14 @@ void scoreboard_refresh(struct scoreboard *scob, int unit, int dest){
                 scob->func_status[1].src1_ready = check_waw(scob->reg_status, scob->func_status[1].src1, 1);
                 scob->func_status[1].src2_ready = check_waw(scob->reg_status, scob->func_status[1].src2, 1);
             }
-            // Update for store
+            // Update for store, needs a float
             if(scob->func_status[3].src1 == dest){
                 scob->func_status[3].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[3].src1, 0);
                 scob->func_status[3].src1_ready = check_waw(scob->reg_status, scob->func_status[3].src1, 0);
             }
-        
+
         }
+        // Update after a store or load
         if(unit == 3){
             if((scob->func_status[1].src1 == dest) || (scob->func_status[1].src2 == dest)){
                 scob->func_status[1].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[1].src1, 1);
@@ -292,16 +311,23 @@ void scoreboard_refresh(struct scoreboard *scob, int unit, int dest){
                 scob->func_status[2].src1_ready = check_waw(scob->reg_status, scob->func_status[2].src1, 2);
                 scob->func_status[2].src2_ready = check_waw(scob->reg_status, scob->func_status[2].src2, 2);
             }
-        
+
         }
 
-        
+
 }
+
+/*
+  Write back stage of the simulator.
+
+*/
 void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf,
                 int int_regs[], float float_regs[], struct output output){
     int i;
     bool update = 0;
+    // For each functional unit if you have to write, write_back
     for(i = 0; i < 4; i++){
+        // you can write back
         if(i == 0 && scob_old.func_status[i].busy == true && scob_old.instr_status.r_stage == 3){
             //Go ahead and pass all our branches they won't write anything
             if((unsigned int)scob_old.func_status[i].op == 1 ||(unsigned int)scob_old.func_status[i].op == 2 ||
@@ -322,6 +348,7 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
             if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
                 continue;
             }
+
             printf("Integer: Now writing back to this register: %d, this value:%d\n\n", scob_old.func_status[0].dest, output.integer);
             // Integer write backs
             int_regs[scob_old.func_status[i].dest] = output.integer;
@@ -337,6 +364,7 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
             scob_new->func_status[i].src1_ready = false;
             scob_new->func_status[i].src2_ready = false;
         }
+        // Float add or sub Writeback
         if(i == 1 && scob_old.func_status[i].busy == true && scob_old.instr_status.fadd_stage == 3){
             if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
                 continue;
@@ -356,6 +384,8 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
             scob_new->func_status[i].src1_ready = false;
             scob_new->func_status[i].src2_ready = false;
         }
+
+        // Float mult write back
         if(i == 2 && scob_old.func_status[i].busy == true && scob_old.instr_status.fmult_stage == 3){
             if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
                 continue;
@@ -375,6 +405,8 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
             scob_new->func_status[i].src1_ready = false;
             scob_new->func_status[i].src2_ready = false;
         }
+
+        //Load or store write back
         if(i == 3 && scob_old.func_status[i].busy == true && scob_old.instr_status.fload_stage == 3){
             if(check_war(scob_old, *scob_new, scob_old.func_status[0].dest, i) == true){
                 continue;
@@ -383,11 +415,11 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
                 scob_new->func_status[3].time -= 1;
                 continue;
             }
-            printf("Load: Now writing back to this register: %d, this value: %f\n\n", 
+            printf("Load: Now writing back to this register: %d, this value: %f\n\n",
                         scob_old.func_status[3].dest, output.float_load);
             // Float load write back sd does nothing here
             if((unsigned int)scob_old.func_status[i].op == 16){
-            
+
             }
             else{
                 float_regs[scob_old.func_status[i].dest] = output.float_load;
@@ -402,10 +434,12 @@ void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct 
             scob_new->func_status[i].Fu_src2 = -1;
             scob_new->func_status[i].src1_ready = false;
             scob_new->func_status[i].src2_ready = false;
-        }        
+        }
     }
 }
-
+/*
+  Checks for a write after a read.
+*/
 bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_dest, int unit){
     if(unit == 0){
         //if(scob_old.instr_status.r_stage == scob_new.instr_status.r_stage && (scob_old.func_status[0].src1 == reg_dest || scob_old.func_status[0].src2 == reg_dest)){
@@ -439,68 +473,75 @@ bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_de
     }
     return false;
 }
+
+/*
+  Execution function for the interger functional unit.
+*/
 void int_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
     // Able to execute
-    if(scob_old.func_status[0].src1_ready == true && scob_old.func_status[0].src2_ready == true 
+    if(scob_old.func_status[0].src1_ready == true && scob_old.func_status[0].src2_ready == true
                         && scob_old.func_status[0].busy == true){
             printf("Integer execution going on: op code is: %lu\n\n", scob_old.func_status[0].op);
             switch((unsigned int)scob_old.func_status[0].op){
                 // Addi
                 case 0:
                     out->integer = operands.r_opA + operands.r_opB;
-                    break;  
+                    break;
                 // B
                 case 1:
                     *pc = TEXT_START + operands.r_opA;
-                    break;  
+                    break;
                 // BEQZ
                 case 2:
                     if(operands.r_opA == 0){
                         *pc = TEXT_START + operands.branch;
                     }
-                    break;  
+                    break;
                 // BGE
                 case 3:
                     if(operands.r_opA > operands.r_opB){
                         *pc = TEXT_START + operands.branch;
                     }
-                    break;  
+                    break;
                 // BNE
                 case 4:
                     if(operands.r_opA != operands.r_opB){
                         *pc = TEXT_START + operands.branch;
                     }
-                    break;  
+                    break;
                 // LA
                 case 5:
                     out->integer= operands.r_opA;
-                    break;  
+                    break;
                 // LB
                 case 6:
                     out->integer = operands.r_opA + operands.r_opB;
-                    break;  
+                    break;
                 // LI
                 case 7:
                     out->integer = operands.r_opA;
-                    break;  
+                    break;
                 // SUBI
                 case 8:
                     out->integer = operands.r_opA - operands.r_opB;
-                    break;  
+                    break;
                 // SYSCALL
                 case 9:
                     syscall(operands.r_opA);
-                    break;  
+                    break;
                 // NOP
                 case 10:
-                    break;  
-                // Add 
+                    break;
+                // Add
                 case 11:
                     out->integer = operands.r_opA + operands.r_opB;
                     break;
                 }
         }
 }
+/*
+  Execution function for the load functional unit.
+*/
 void fload_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
     mem_addr address;
     if(scob_old.func_status[3].src1_ready == true && scob_old.func_status[3].src2_ready == true
@@ -518,7 +559,9 @@ void fload_execution(struct scoreboard scob_old, struct operands operands, struc
     }
 }
 
-
+/*
+  Execution function for the floating point add and sub functional unit.
+*/
 void fp_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
     if(scob_old.func_status[1].src1_ready == true && scob_old.func_status[1].src2_ready == true
                         && scob_old.func_status[1].busy == true){
@@ -533,7 +576,9 @@ void fp_execution(struct scoreboard scob_old, struct operands operands, struct o
         }
     }
 }
-
+/*
+  Execution function for the floating point mult functional unit.
+*/
 void fmult_execution(struct scoreboard scob_old, struct operands operands, struct output *out, mem_addr *pc, struct scoreboard *scob_new){
     if(scob_old.func_status[2].src1_ready == true && scob_old.func_status[2].src2_ready == true
                     && scob_old.func_status[2].busy == true){
@@ -541,13 +586,15 @@ void fmult_execution(struct scoreboard scob_old, struct operands operands, struc
             out->float_mult = operands.fmult_opA * operands.fmult_opB;
     }
 }
-
+/*
+  Reads all the operands avaible for every instruction issued.
+*/
 void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_reg_file[], struct operands *operands,
                                         struct fetch_buf fetch_buf, struct scoreboard *scob_new){
     int i;
     for(i = 0; i < 4; i++){
             //Both source registers are ready
-        if(scob_old.func_status[i].src1_ready == true && scob_old.func_status[i].src2_ready == true 
+        if(scob_old.func_status[i].src1_ready == true && scob_old.func_status[i].src2_ready == true
                         && scob_old.func_status[i].busy == true){
             printf("Operands read for this unit %d\n\n", i);
             //Set them to false so it hasn't get pulled during execution next clock
@@ -563,92 +610,94 @@ void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_r
                 case 0:
                     operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
                     operands->r_opB = fetch_buf.integer.type1.label;
-                    break;  
+                    break;
                 // B
                 case 1:
                     operands->r_opA = fetch_buf.integer.type3.label;
-                    break;  
+                    break;
                 // BEQZ
                 case 2:
                     operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
                     operands->branch = fetch_buf.integer.type2.label;
-                    break;  
+                    break;
                 // BGE
                 case 3:
                     operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
                     operands->r_opB = int_reg_file[scob_old.func_status[i].src2];
                     operands->branch = fetch_buf.integer.type1.label;
-                    break;  
+                    break;
                 // BNE
                 case 4:
                     operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
                     operands->r_opB = int_reg_file[scob_old.func_status[i].src2];
                     operands->branch = fetch_buf.integer.type1.label;
-                    break;  
+                    break;
                 // LA
                 case 5:
                     operands->r_opA = fetch_buf.integer.type2.label;
-                    break;  
+                    break;
                 // LB
                 case 6:
                     operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
                     operands->r_opB = fetch_buf.integer.type1.label;
-                    break;  
+                    break;
                 // LI
                 case 7:
                     operands->r_opA = fetch_buf.integer.type2.label;
-                    break;  
+                    break;
                 // SUBI
                 case 8:
                     operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
                     operands->r_opB = fetch_buf.integer.type1.label;
-                    break;  
+                    break;
                 // SYSCALL
                 case 9:
                     operands->r_opA = fetch_buf.integer.type3.label;
-                    break;  
+                    break;
                 // NOP
                 case 10:
                     operands->r_opA = fetch_buf.integer.type3.label;
-                    break;  
-                // Add 
+                    break;
+                // Add
                 case 11:
                     operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
                     operands->r_opB = int_reg_file[scob_old.func_status[i].src2];
-                    break;  
+                    break;
                 // fAdd
                 case 12:
                     operands->fadd_opA = float_reg_file[scob_old.func_status[i].src1];
                     operands->fadd_opB = float_reg_file[scob_old.func_status[i].src2];
-                    break;  
+                    break;
                 // fmult
                 case 13:
                     operands->fmult_opA = float_reg_file[scob_old.func_status[i].src1];
                     operands->fmult_opB = float_reg_file[scob_old.func_status[i].src2];
-                    break;  
+                    break;
                 // fsub
                 case 14:
                     operands->fadd_opA = float_reg_file[scob_old.func_status[i].src1];
                     operands->fadd_opB = float_reg_file[scob_old.func_status[i].src2];
-                    break;  
+                    break;
                 // ld
                 case 15:
                     operands->load_A = int_reg_file[scob_old.func_status[i].src1];
                     operands->load_B = fetch_buf.load.type1.label;
-                    break;  
+                    break;
                 // sd
                 case 16:
                     // src value to store
                     operands->store_A = float_reg_file[scob_old.func_status[i].src1];
                     // offset = offset + value in integer register
                     operands->load_B = fetch_buf.load.type1.label + int_reg_file[scob_old.func_status[i].dest];
-                    break;  
+                    break;
             }
         }
     }
 
 }
-
+/*
+  Sets all registers to -1;
+*/
 void init_reg(struct reg_status *reg_status, int int_reg_file[], float float_reg_file[]){
     int i;
     for(i = 0; i < INT_REG_NUM; i++){
@@ -660,10 +709,12 @@ void init_reg(struct reg_status *reg_status, int int_reg_file[], float float_reg
         reg_status->f_reg_status[i] = -1;
     }
 }
-
+/*
+  Actually does the issue of setting the scoreboard for a new instrction that is issued.
+*/
 void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op){
     int type = instruction.type;
-    
+
     //Issue the Instructions that use Integer FU
     if(op < 12 && op >= 0){
             scob->func_status[0].busy = true;
@@ -721,7 +772,7 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
     //Issue the instructions that use the FLOAT ADDER and SUB
     if((unsigned int)op == 12  || (unsigned int)op == 14){
                 scob->reg_status.f_reg_status[instruction.type1.r_dest] = 1;
-                // Only type 1 instructions for FLOAT  
+                // Only type 1 instructions for FLOAT
                 scob->func_status[1].busy = true;
                 scob->func_status[1].op = op;
                 scob->func_status[1].dest = instruction.type1.r_dest;
@@ -779,7 +830,9 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
 
 }
 
-
+/*
+  Gets the functional unit that is related to the src register of some instruction.
+*/
 unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int r_or_f){
     // Integer register
     if(r_or_f == 0){
@@ -821,7 +874,7 @@ bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboa
     // Get reg destination of instruction
     if(instr_decoded.type == 1){reg_dest = instr_decoded.type1.r_dest;}
     if(instr_decoded.type == 2){reg_dest = instr_decoded.type2.r_target;}
-    
+
 
     // Check to see if the FUNC UNIT is already in use
     if(check_struct(scob_old.func_status[get_functional_unit(op)], op) == true){
@@ -844,7 +897,10 @@ bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboa
     printf("Just issued this instruction with opcode: %lu\n", op);
     return true;
 }
-    
+
+/*
+  Sets the fetch buffer with the new instruction that comes in.
+*/
 void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr, unsigned int op){
     // Integer
     if(op < 12 && op >= 0){
@@ -865,8 +921,11 @@ void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr,
     }
 }
 
+/*
+  Checks for writes after writes.
+*/
 bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f){
-    // r_or_f tells whether the register is a float or integer, a float will never write to integer register 
+    // r_or_f tells whether the register is a float or integer, a float will never write to integer register
     // 0 if integer, 1 if float
     //Store -1 when not in use
     switch(r_or_f){
@@ -887,52 +946,59 @@ bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f){
     return true;
 }
 
+/*
+  Checks for structural hazards.
+*/
 bool check_struct(struct func_status fu_status, unsigned int op){
     int i = 0;
     //All using integer unit
     if((unsigned int)op < 12 && (unsigned int)op >= 0){
         // 0 is integer unit
         if(fu_status.busy == true){
-            return true; 
+            return true;
         }
     }
     //Fpoint add and sub
     if((unsigned int)op == 12 || (unsigned int)op == 14){
         if(fu_status.busy == true){
-            return true; 
+            return true;
         }
     }
     // Fmult
     if((unsigned int)op == 13){
         if(fu_status.busy == true){
-            return true; 
+            return true;
         }
     }
     // LOAD/STORE
     if((unsigned int)op == 15 || (unsigned int)op == 16){
         if(fu_status.busy == true){
-            return true; 
+            return true;
         }
     }
     return false;
 }
+
+/*
+  Gets the functional unit related to a certain op code.
+*/
 int get_functional_unit(unsigned int op){
     //All using integer unit
     if(op < 12 && op >= 0){
         // 0 is integer unit
-            return 0; 
+            return 0;
     }
     //Fpoint add and sub
     if(op == 12 || op == 14){
-            return 1; 
+            return 1;
     }
     // Fmult
     if(op == 13){
-            return 2; 
+            return 2;
     }
     // LOAD/STORE
     if(op == 15 || op == 16){
-            return 3; 
+            return 3;
     }
     return -1;
 }
@@ -1002,7 +1068,7 @@ void load_data(char* token){
     char *label = NULL;
     char *address = NULL;
     char *value = NULL;
-    
+
     mem_addr addr = 0;
     mem_word val = 0;
 
@@ -1119,7 +1185,7 @@ void load_text(char* token, int *index){
         new_instruction = type2_create(instruction);
         write_instr(address, new_instruction);
         *index += 1;
-        }   
+        }
     // B Requires a label that references the instruction_segment
     if(op_code == 1){
         struct instr_type3 instruction;
@@ -1155,7 +1221,7 @@ void load_text(char* token, int *index){
         instr = strtok(NULL, ", "); // Second half
         reg_index = strcspn(instr, "$");
         close_par_index = strcspn(instr, ")");
-        
+
         memcpy(reg, instr + reg_index + 1, (close_par_index - reg_index));
         instruction.r_src = strtol(reg, (char **)NULL, 10); // Reg_src
         memcpy(offset, instr, reg_index - 1);
@@ -1167,7 +1233,7 @@ void load_text(char* token, int *index){
     }
 }
 
-/* 
+/*
 	TYPE 1 instruction encoding: 4 bit OP code, 5 bit Rdest, 5 bit Rsrc, 18 bit Label
 	Description: Encodes a type1 Instruction.
  	Params: struct instr_type1 instr - parsed values from source file
@@ -1188,7 +1254,7 @@ instruction type1_create(struct instr_type1 instr){
 	Description: Encodes a type2 Instruction.
  	Params: struct instr_type2 instr - parsed values from source file
  	Returns: instruction - in type2 format
-*/ 
+*/
 instruction type2_create(struct instr_type2 instr){
     instruction new_instruction = 0;
     new_instruction = (instr.op_code << 27) | new_instruction;
@@ -1201,7 +1267,7 @@ instruction type2_create(struct instr_type2 instr){
 	Description: Encodes a type3 Instruction.
  	Params: struct instr_type3 instr - parsed values from source file
  	Returns: instruction - in type3 format
-*/ 
+*/
 instruction type3_create(struct instr_type3 instr){
     instruction new_instruction = 0;
     new_instruction = (instr.op_code << 27) | new_instruction;
@@ -1239,7 +1305,7 @@ int get_opCode(char *instr){
   Returns: int - the index of the label so the address can be looked up
 */
 int find_label(char* to_search){
-    int i; 
+    int i;
     for(i = 0; i < last_label; i++){
         if(strcmp(to_search, labels[i]) == 0){
             return label_addresses[i];
@@ -1326,7 +1392,7 @@ struct instruction_container decode(instruction to_decode){
     mem_word src;
     mem_word label;
     // Type 1
-    if((op_code == 0) || (op_code == 3) 
+    if((op_code == 0) || (op_code == 3)
             || (op_code == 4) || (op_code == 6) || ((unsigned int)op_code == 8) || ((unsigned int) op_code == 11) ||
                 ((unsigned int) op_code > 11)){
         instruction.type1.op_code = op_code;
@@ -1356,7 +1422,7 @@ struct instruction_container decode(instruction to_decode){
         instruction.type3.op_code = (mem_word) op_code;
         instruction.type3.label = (mem_word) (to_decode & 0x07ffffff);
         instruction.type = 3;
-        //Branch label or System call 
+        //Branch label or System call
        // decoded.op_a = instruction.type3.label;
     }
     //NOP
@@ -1366,206 +1432,6 @@ struct instruction_container decode(instruction to_decode){
     }
    return instruction;
 }
-/*
-      Description: Executed an instruction from the decode latch
-      Params: id_exe to_execute - latch containing values of the instruction to be executed
-              exe_mem *old - values from the prev execution, may cause hazards without
-              mem_wb *new - values from the prev clock cycles, values will be written this CC
-      Returns: exe_mem exe_latch - latch with values from execution
-*/
-void _exe(){
-        /*
-        unsigned int op_code;
-        struct exe_mem exe_latch;
-        int type = to_execute.instruction.type;
-        if(type == 1) op_code = to_execute.instruction.type1.op_code;
-        if(type == 2) op_code = to_execute.instruction.type2.op_code;
-        if(type == 3) op_code = to_execute.instruction.type3.op_code;
-        exe_latch.op_code = op_code;
-        // We need to clear this value for instructions that don't use it
-        // if we don't we get values being written back to registers we don't want
-        if((unsigned int) op_code == 4 || (unsigned int) op_code == 2 || (unsigned int) op_code == 1 
-                    || (unsigned int) op_code == 3 || (unsigned int) op_code == 10){
-            exe_latch.r_dest = -1;
-        }
-            We are looking for the prev execution and mem access rd to match our sd or td
-            Op coded 6 is Load byte, so we have to use the value MDR since that is from memory
-                rather than the ALU_out
-            We will be checking mem hazards first and then exe because the exe would eventualy write
-                over the value about to be store in memory
-        // ADDI and SUBI MEM HAZARDs
-        if((exe_latch.op_code == 0) || (unsigned int)exe_latch.op_code == 8){
-            if(to_execute.instruction.type1.r_src == (*new).reg_dest){
-                to_execute.op_a = (*new).ALU_out;
-                if((*new).op_code == 6){
-                    to_execute.op_a = (*new).MDR;
-                }
-            }
-        }
-        // ADD MEM HAZARD
-        if((unsigned int)exe_latch.op_code == 11){
-            if(to_execute.instruction.type1.r_src == (*new).reg_dest){
-                to_execute.op_a = (*new).ALU_out;
-                if((*new).op_code == 6){
-                    to_execute.op_a = (*new).MDR;
-                }
-            }
-            if(to_execute.instruction.type1.label == (*new).reg_dest){
-                to_execute.op_b= (*new).ALU_out;
-                if((*new).op_code == 6){
-                    to_execute.op_b = (*new).MDR;
-                }
-            }
-        }
-        // LB MEM HAZARD
-        if(exe_latch.op_code == 6){
-            if(to_execute.instruction.type1.r_src == (*new).reg_dest){
-                to_execute.op_a = (*new).ALU_out;
-            }
-            if(to_execute.instruction.type1.r_src == (*old).r_dest){
-                to_execute.op_a = (*old).ALU_out;
-            }
-
-        }
-        // ADDI and SUBI EXE HAZARDS
-        if((exe_latch.op_code == 0) || (unsigned int)exe_latch.op_code == 8){
-            if(to_execute.instruction.type1.r_src == (*old).r_dest){
-                to_execute.op_a = (*old).ALU_out;
-            }
-        }
-        // ADD EXE HAZARD
-        if((unsigned int)exe_latch.op_code == 11){
-            //printf("EXE HAZARDS\n");
-            if(to_execute.instruction.type1.r_src == (*old).r_dest){
-                to_execute.op_a = (*old).ALU_out;
-            }
-            if(to_execute.instruction.type1.label == (*old).r_dest){
-                to_execute.op_b= (*old).ALU_out;
-            }
-        }
-        switch((unsigned int)op_code){
-            case 0: // ADDI
-                exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, exe_latch.op_code);
-                exe_latch.r_dest = to_execute.instruction.type1.r_dest;
-                break;
-            case 5: // LA
-                // Destination
-                exe_latch.r_dest = to_execute.instruction.type2.r_target;
-                //Offset
-                exe_latch.ALU_out = to_execute.instruction.type2.label + DATA_START;
-                break;
-            case 6: // LB
-                // Offset for target memory address
-                exe_latch.ALU_out = to_execute.op_a + to_execute.op_b;
-                // Destionation register
-                exe_latch.r_dest = to_execute.instruction.type1.r_dest;
-                break;
-            case 7: // LI
-                exe_latch.ALU_out = to_execute.instruction.type2.label;
-                exe_latch.r_dest = to_execute.instruction.type2.r_target;
-                break;
-            case 8: // SUBI
-                exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, exe_latch.op_code);
-                exe_latch.r_dest = to_execute.instruction.type1.r_dest;
-                break;
-            case 9: // SYSCALL
-                syscall(to_execute.op_a);
-                break;
-            case 11:
-                exe_latch.ALU_out = alu(to_execute.op_a, to_execute.op_b, 0);
-                exe_latch.r_dest = to_execute.instruction.type1.r_dest;
-                break;
-        }
-        return exe_latch;
-    */
-}
-/*
-    Description: Access memory with instructions that need to do so.
-    Params: exe_mem to_access - contains values needed for mem access
-    returns mem_wb to_write_back - values needed for writing back to register file
-*/
-void _mem(){
-    /*
-    struct mem_wb to_write_back;
-    to_write_back.op_code = to_access.op_code;
-    to_write_back.ALU_out = to_access.ALU_out;
-    to_write_back.reg_dest = to_access.r_dest;
-    //Load byte is the only instruction that needs to access the memory
-    if((unsigned int) to_access.op_code == 6){
-        to_write_back.MDR = read_mem(to_write_back.ALU_out);
-    }
-    return to_write_back;
-    */
-}
-/*
-    Description: Write back to the requested register
-    Params: mem_wb to_write - latch containing data used for the write back process
-    Returns: void - instruction is finished
-*/
-void _wb(){
-        // write backs
-    /*
-      switch((unsigned int) to_write.op_code){
-        case 0:
-            REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
-            break;
-        case 5:
-            REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
-            break;
-        case 6: // We write back MDR because that is the value from memory
-            REGISTER_FILE[to_write.reg_dest] = to_write.MDR;
-            break;
-        case 7:
-            REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
-            break;
-        case 8:
-            REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
-            break;
-        case 11:
-            REGISTER_FILE[to_write.reg_dest] = to_write.ALU_out;
-            break;
-    }
-    */
-}
-
-/*Description: Does standard alu calculations.
-  Params: struct instruction_container - instruction, int op_code - alu function code
-  Returns: returns the value of op code if correctly completes.
-*/
-int alu(int op_a, int op_b, int op_code){
-	// Addi
-    if(op_code == 0){
-        return (op_a + op_b);
-    }
-    // Check if equals 0
-    if(op_code == 2){
-        if(op_a == 0){
-            return 2;
-        }
-        else return -1;
-    }
-    // Check if greater than or equal
-    if(op_code == 3){
-        if(op_a >= op_b){
-            return 3;
-        }
-        else return -1;
-    }
-    // Check for inequality
-    if(op_code == 4){
-        if(op_a != op_b){
-            return 4;
-        }
-        else return -1;
-    }
-    // Subi
-    if(op_code == 8){
-        return (op_a - op_b);
-    }
-    return -1;
-    
-}
-
 /*Description: Completes the corresponding SYSCALL.
   Params: mem_word function - the system function
   Returns: instruction - opcode number or address for an instruction
@@ -1575,7 +1441,7 @@ int syscall(mem_word function){
     int index = 0;
     if(function == 0){
         //int index  = get_index((REGISTER_FILE[0] - DATA_START));
-        char buff[string_lengths[index]];     
+        char buff[string_lengths[index]];
         scanf("%s", buff);
         memcpy((data_segment + string_addresses[index]), buff, strlen(buff)+ 1);
         data_segment[strlen(buff)] = '\0';

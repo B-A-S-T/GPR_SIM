@@ -1,0 +1,125 @@
+Created by Ian Thomas igt0001 with help of Lanxin Ma, December 2016.
+
+Group 1 Computer Architecture
+
+GPR with Scoreboard type architecture machine simulated with inspiration from the MIPS/SPIM simulator, with
+a full and piped Implementation.
+
+One source file comes included:
+Lab4c.s - DTMF LOOP
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Instruction set:
+add Rdest, Rsrc1, Rsrc2  |add two and store in one
+addi  Rdest, Rsrc1, Imm  |add one with value
+b  label                 |branch to label
+beqz  Rsrc1, label       |branch if eq to zero
+bge  Rsrc1, Rsrc2, label |branch if Rsrc1 > Rsrc2
+bne  Rsrc1, Rsrc2, label |branch if Rsrc1 != Rsrc2
+la  Rdest, label         |load address
+lb  Rdest, offset(Rsrc1) |load byte, Rsrc contains start address plus offset
+li  Rdest, Imm           |load immediate value
+nop                      |no operation
+subi  Rdest, Rsrc1, Imm  |subtract immediate value from register
+syscall                  |preforms system call
+fadd Fdest, Fsrc1, Fsrc2 |floating point addition
+fmull Fdest, Fsrc1, Fsrc2|floating point multiplication
+fsub Fdest, Fsrc1, Fsrc2 |floating point substraction
+ld  Fdest, offset(Rsrc1) |load a double in Freg
+sd  Fsource, offset(Rsrc1)|store a double in Freg
+
+
+System calls:
+syscall 9 - exit
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Compile and run instructions:
+gcc -w sco_fullSim.c -o full
+./full lab4c.s
+
+gcc -w sco_pipeSim.c -o piped
+./piped 1ab4c.s
+
+USAGE:
+.data section -> .text section
+Declare data as so:
+
+.data
+.label label_name instruction_offset_in_hex
+.space string_name num_bytes
+.float "Float value inside these quotes"
+
+.text
+INSTRUCTIONS
+
+
+Notes on using simulator:
+1) Nop is needed after every branch.
+b my_label
+nop
+
+2) 2 Nops needed after every branch in "sco_pipeSim.c"
+
+3) Count instructions and set it to correct number in the fetch(function)
+
+4) Labels are created by counting the number of instructions starting from 0 before the
+   desired instruction location.
+.data
+.label my_label 0x50000001
+
+.text
+li $1, 0
+<Where my branch will take me>
+li $2, 1
+nop
+nop
+nop
+b my_label
+nop
+
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Observations:
+Full SIM:
+Instructions: 1417
+Clock Cycles: 4741
+Nops: 1
+
+This had so little nop's because the integer functional unit does the nops and branches. So when we have a branch, the nop
+just stalls for us while branch executes, only happens last while loop.
+
+Piped SIM:
+Instructions: 1417
+Clock Cycles: 4739
+Nops: 200
+
+Lab4c.s
+It looks that they both give the correct value. The biggest setback seems to be that the loads
+take so long. We have more loads in this program than we do actually arithmetic. This causes the programs
+to give such poor performance.
+
+Even with the pipelined simulator we don't see much of a different because the loads have to take place most of
+the time before the arithmetic can happen. Only having one stage for loads seems to be the biggest bottle neck,
+we should look at implementing register transfer to drastically enhance the program.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Design:
+This project we very design heavy, even with the scoreboard, it required a lot of design decisions to take place.
+The most difficult thing was figuring out how exactly to update the instructions that were stalling while waiting for
+operands to be read.
+
+Another difficulty was figuring out how to push all of the instructions through the piped implementation. I think
+it is working fine.
+
+Some Problems:
+Syscalls don't really exist because they were used for printing strings, and we have a different data type, floats.
+So I converted the past data_segement from char* to a float data_segment[MAX_SEG_SIZE]. Helped alot.
+
+I'm positive WAW, structural hazards, pipelining and waiting to read operand works completely. Didn't get to stretch my WAR checker
+past the implementation file though.
+
+Very long, but enjoyable.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
