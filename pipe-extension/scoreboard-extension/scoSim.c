@@ -178,12 +178,12 @@ void _wb();
 void scoreboard_issue(struct scoreboard *scob, struct instruction_container instruction, unsigned int op);
 unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int f_or_w);
 bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer,
-                                struct performance *performance);
+                                struct performance *performance, int *to_run);
 void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr, unsigned int op);
 bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f);
 bool check_struct(struct func_status fu_status, unsigned int op);
 // need to change int to int * possible
-instruction fetch(mem_addr *address, int to_run);
+instruction fetch(mem_addr *address, int *to_run);
 struct instruction_container decode(instruction to_decode);
 int get_fuctional_unit(unsigned int op);
 void init_reg(struct reg_status *reg_status, int int_reg_file[], float float_reg_file[]);
@@ -211,22 +211,26 @@ int main(int argc, char *argv[]){
     struct fetch_buf fetch_new;
     struct output out_old;
     struct output out_new;
+    
+    int to_run = 1;
 
-    bool running = true;
     int clock_cycles = 0;
     mem_addr pc = TEXT_START; // PC
     
     struct performance performance;
 
+    performance.instruction_count = 0;
+    performance.nop_count = 0;
+    performance.clock_cycles = 0;
     make_memory();
     parse_source_code(argv[1]);
     init_reg(&scob_new.reg_status, int_reg_file, float_reg_file);
     int i;
-    for(i = 0; i < 100; i++){
+    while(to_run){
         scob_old = scob_new;
         fetch_old = fetch_new;
         out_old = out_new;
-        instruction_issue(&pc, scob_old, &scob_new, &fetch_new, &performance);
+        instruction_issue(&pc, scob_old, &scob_new, &fetch_new, &performance, &to_run);
         read_operands(scob_old, int_reg_file, float_reg_file, &operands, fetch_old, &scob_new);
         int_execution(scob_old, operands, &out_new, &pc, &scob_new);
         fp_execution(scob_old, operands, &out_new, &pc, &scob_new);
@@ -686,6 +690,7 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
                 scob->func_status[0].src2_ready = check_waw(scob->reg_status, scob->func_status[0].src2, 0);
             }
             // ADD
+            else{
             scob->func_status[0].dest = instruction.type1.r_dest;
             scob->func_status[0].src1 = instruction.type1.r_src;
             scob->func_status[0].src2 = instruction.type1.label;
@@ -693,7 +698,7 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
             scob->func_status[0].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[0].src2, 0);
             scob->func_status[0].src1_ready = check_waw(scob->reg_status, scob->func_status[0].src1, 0);
             scob->func_status[0].src2_ready = check_waw(scob->reg_status, scob->func_status[0].src2, 0);
-            
+            }
         }
         if(type == 2){
             scob->reg_status.r_reg_status[instruction.type2.r_target] = 0;
@@ -796,12 +801,12 @@ unsigned int get_src_fu(struct reg_status reg_status, int reg, unsigned int r_or
     moving to another stage.
 */
 bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buffer,
-                                                struct performance *performance){
+                                                struct performance *performance, int *to_run){
 
     performance->clock_cycles += 1;
 
     struct instruction_container instr_decoded;
-    instruction instr_fetched = fetch(pc, 1);
+    instruction instr_fetched = fetch(pc, to_run);
     unsigned int op;
     mem_word reg_dest;
     instr_decoded = decode(instr_fetched);
@@ -873,7 +878,7 @@ bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f){
             break;
         case 1:
             if(reg_dest > 16 || reg_dest < 0){return false;}
-            if(reg_stat.f_reg_status[reg_dest] != -1 && r_or_f == 1){
+            if(reg_stat.f_reg_status[reg_dest] != -1){
                 return false;
             }
             break;
@@ -885,26 +890,26 @@ bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f){
 bool check_struct(struct func_status fu_status, unsigned int op){
     int i = 0;
     //All using integer unit
-    if(op < 12 && op >= 0){
+    if((unsigned int)op < 12 && (unsigned int)op >= 0){
         // 0 is integer unit
         if(fu_status.busy == true){
             return true; 
         }
     }
     //Fpoint add and sub
-    if(op == 12 || op == 14){
+    if((unsigned int)op == 12 || (unsigned int)op == 14){
         if(fu_status.busy == true){
             return true; 
         }
     }
     // Fmult
-    if(op == 13){
+    if((unsigned int)op == 13){
         if(fu_status.busy == true){
             return true; 
         }
     }
     // LOAD/STORE
-    if(op == 15 || op == 16){
+    if((unsigned int)op == 15 || (unsigned int)op == 16){
         if(fu_status.busy == true){
             return true; 
         }
@@ -1264,17 +1269,16 @@ float read_mem(mem_addr address){
       Params: address - address to read from, to_run - signaling last instruction
       Returns: if_id fetched - latch from fetch
 */
-instruction fetch(mem_addr *address, int to_run){
+instruction fetch(mem_addr *address, int *to_run){
     instruction fetched;
     // Fetch and check to see if this instruction is out of bounds, if so we know we are at end of file
     if((*address <  TEXT_TOP) && (*address >= TEXT_START)){
         fetched = text_segment[(*address - TEXT_START)];
         printf("This is address from fetch: %d\n", (*address - TEXT_START));
+        if((*address - TEXT_START) == 29){
+            *to_run = 0;
+        }
         *address += 1;
-        return fetched;
-    }
-    else{
-        to_run = 0;
         return fetched;
     }
 }
