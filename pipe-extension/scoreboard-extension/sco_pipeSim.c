@@ -116,15 +116,21 @@ struct reg_status{
     Scoreboard holds all data structures.
 */
 struct scoreboard{
-    struct func_status func_status[4];
-    struct instr_status instr_status;
+    struct func_status int_func[2];
+    struct func_status add_func[2];
+    struct func_status mult_func[6];
+    struct func_status load_func;
+    struct instr_status int_stat[2];
+    struct instr_status add_stat[2];
+    struct instr_status mult_stat[6];
+    struct instr_status load_stat;
     struct reg_status reg_status;
 };
 
 struct fetch_buf{
-    struct instruction_container integer;
-    struct instruction_container f_add;
-    struct instruction_container f_mult;
+    struct instruction_container integer[2];
+    struct instruction_container f_add[2];
+    struct instruction_container f_mult[6];
     struct instruction_container load;
 };
 
@@ -181,7 +187,7 @@ bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboa
                                 struct performance *performance, int *to_run);
 void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr, unsigned int op);
 bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f);
-bool check_struct(struct func_status fu_status, unsigned int op);
+bool check_struct(struct scoreboard score, unsigned int op);
 // need to change int to int * possible
 instruction fetch(mem_addr *address, int *to_run);
 struct instruction_container decode(instruction to_decode);
@@ -197,6 +203,8 @@ bool check_war(struct scoreboard scob_old,struct scoreboard scob_new ,int reg_de
 void write_back(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf fetch_buf,
                 int int_regs[], float float_regs[], struct output output);
 void scoreboard_refresh(struct scoreboard *scob, int unit, int reg);
+
+
 /*Main entry into simulator, one argument should be passed, the filename.*/
 int main(int argc, char *argv[]){
     //Reg files
@@ -231,6 +239,7 @@ int main(int argc, char *argv[]){
         fetch_old = fetch_new;
         out_old = out_new;
         instruction_issue(&pc, scob_old, &scob_new, &fetch_new, &performance, &to_run);
+        push_pipe(scob_old, &scob_new, &fetch_new)
         read_operands(scob_old, int_reg_file, float_reg_file, &operands, fetch_old, &scob_new);
         int_execution(scob_old, operands, &out_new, &pc, &scob_new);
         fp_execution(scob_old, operands, &out_new, &pc, &scob_new);
@@ -246,6 +255,25 @@ int main(int argc, char *argv[]){
     free(text_segment);
     return 0;
 }
+
+void push_pipe(struct scoreboard scob_old, struct scoreboard *scob_new, struct fetch_buf *fetch_buf){
+    if(scob_old.int_func[1].busy == false && scob_old.int_func[0].busy == true){
+        scob_new->int_func[1] = scob_old.int_func[0];
+        fetch_buf->integer[1] = fetch_buf->integer[0];
+    }
+    if(scob_old.add_func[1].busy == false && scob_old.add_func[0].busy == true){
+        scob_new->int_func[1] = scob_old.add_func[0];
+    }
+
+
+
+
+
+
+
+
+}
+
 
 void scoreboard_refresh(struct scoreboard *scob, int unit, int dest){
         if(unit == 0 && scob->func_status[3].op == 15){
@@ -545,106 +573,139 @@ void fmult_execution(struct scoreboard scob_old, struct operands operands, struc
 void read_operands(struct scoreboard scob_old, int int_reg_file[], float float_reg_file[], struct operands *operands,
                                         struct fetch_buf fetch_buf, struct scoreboard *scob_new){
     int i;
+    unsigned int op = 100;
     for(i = 0; i < 4; i++){
             //Both source registers are ready
-        if(scob_old.func_status[i].src1_ready == true && scob_old.func_status[i].src2_ready == true 
-                        && scob_old.func_status[i].busy == true){
-            printf("Operands read for this unit %d\n\n", i);
+        if(scob_old.int_func[1].src1_ready == true && scob_old.int_func[1].src2_ready == true 
+                        && scob_old.int_func[1].busy == true){
+                printf("Operands read for this unit 0\n\n", i);
             //Set them to false so it hasn't get pulled during execution next clock
-            scob_new->func_status[i].src1_ready = false;
-            scob_new->func_status[i].src2_ready = false;
-            if(i == 0){scob_new->instr_status.r_stage = 3;}
-            if(i == 1){scob_new->instr_status.fadd_stage = 3;}
-            if(i == 2){scob_new->instr_status.fmult_stage = 3;}
-            if(i == 3){scob_new->instr_status.fload_stage = 3;}
+                scob_new->int_func[1].src1_ready = false;
+                scob_new->int_func[1].src2_ready = false;
+                scob_new->int_stat[1].r_stage = 3;
+                op = scob_new->int_func[1].op;
+                goto grab;
+        }
+        if(scob_old.add_func[1].src1_ready == true && scob_old.add_func[1].src2_ready == true 
+                        && scob_old.add_func[1].busy == true){
+                printf("Operands read for this unit 1\n\n", i);
+            //Set them to false so it hasn't get pulled during execution next clock
+                scob_new->add_func[1].src1_ready = false;
+                scob_new->add_func[1].src2_ready = false;
+                scob_new->add_stat[1].fadd_stage = 3;
+                op = scob_new->add_func[1].op;
+                goto grab;
+        }
+        if(scob_old.mult_func[5].src1_ready == true && scob_old.mult_func[1].src2_ready == true 
+                        && scob_old.mult_func[5].busy == true){
+                printf("Operands read for this unit 2\n\n", i);
+            //Set them to false so it hasn't get pulled during execution next clock
+                scob_new->mult_func[1].src1_ready = false;
+                scob_new->mult_func[1].src2_ready = false;
+                scob_new->mult_stat[1].fmult_stage = 3;
+                op = scob_new->mult_func[1].op;
+                goto grab;
+         }
+         if(scob_old.load_func.src1_ready == true && scob_old.load_func.src2_ready == true 
+                        && scob_old.load_func.busy == true){
+                printf("Operands read for this unit 3\n\n");
+            //Set them to false so it hasn't get pulled during execution next clock
+                scob_new->load_func.src1_ready = false;
+                scob_new->load_func.src2_ready = false;
+                scob_new->load_stat.fload_stage = 3;
+                op = scob_new->load_func.op;
+                goto grab;
+         }
+    goto end;
+    grab:
             //Need to grab operands
-            switch((unsigned int)scob_old.func_status[i].op){
+            switch((unsigned int)op){
                 // Addi
                 case 0:
-                    operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
-                    operands->r_opB = fetch_buf.integer.type1.label;
+                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->r_opB = fetch_buf.integer[1].type1.label;
                     break;  
                 // B
                 case 1:
-                    operands->r_opA = fetch_buf.integer.type3.label;
+                    operands->r_opA = fetch_buf.integer[1].type3.label;
                     break;  
                 // BEQZ
                 case 2:
-                    operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
-                    operands->branch = fetch_buf.integer.type2.label;
+                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->branch = fetch_buf.integer[1].type2.label;
                     break;  
                 // BGE
                 case 3:
-                    operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
-                    operands->r_opB = int_reg_file[scob_old.func_status[i].src2];
-                    operands->branch = fetch_buf.integer.type1.label;
+                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->r_opB = int_reg_file[scob_old.int_func[1].src2];
+                    operands->branch = fetch_buf.integer[1].type1.label;
                     break;  
                 // BNE
                 case 4:
-                    operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
-                    operands->r_opB = int_reg_file[scob_old.func_status[i].src2];
-                    operands->branch = fetch_buf.integer.type1.label;
+                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->r_opB = int_reg_file[scob_old.int_func[1].src2];
+                    operands->branch = fetch_buf.integer[1].type1.label;
                     break;  
                 // LA
                 case 5:
-                    operands->r_opA = fetch_buf.integer.type2.label;
+                    operands->r_opA = fetch_buf.integer[1].type2.label;
                     break;  
                 // LB
                 case 6:
-                    operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
-                    operands->r_opB = fetch_buf.integer.type1.label;
+                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->r_opB = fetch_buf.integer[1].type1.label;
                     break;  
                 // LI
                 case 7:
-                    operands->r_opA = fetch_buf.integer.type2.label;
+                    operands->r_opA = fetch_buf.integer[1].type2.label;
                     break;  
                 // SUBI
                 case 8:
-                    operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
-                    operands->r_opB = fetch_buf.integer.type1.label;
+                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->r_opB = fetch_buf.integer[1].type1.label;
                     break;  
                 // SYSCALL
                 case 9:
-                    operands->r_opA = fetch_buf.integer.type3.label;
+                    operands->r_opA = fetch_buf.integer[1].type3.label;
                     break;  
                 // NOP
                 case 10:
-                    operands->r_opA = fetch_buf.integer.type3.label;
+                    operands->r_opA = fetch_buf.integer[1].type3.label;
                     break;  
                 // Add 
                 case 11:
-                    operands->r_opA = int_reg_file[scob_old.func_status[i].src1];
-                    operands->r_opB = int_reg_file[scob_old.func_status[i].src2];
+                    operands->r_opA = int_reg_file[scob_old.int_func[1].src1];
+                    operands->r_opB = int_reg_file[scob_old.int_func[1].src2];
                     break;  
                 // fAdd
                 case 12:
-                    operands->fadd_opA = float_reg_file[scob_old.func_status[i].src1];
-                    operands->fadd_opB = float_reg_file[scob_old.func_status[i].src2];
+                    operands->fadd_opA = float_reg_file[scob_old.add_func[1].src1];
+                    operands->fadd_opB = float_reg_file[scob_old.add_func[1].src2];
                     break;  
                 // fmult
                 case 13:
-                    operands->fmult_opA = float_reg_file[scob_old.func_status[i].src1];
-                    operands->fmult_opB = float_reg_file[scob_old.func_status[i].src2];
+                    operands->fmult_opA = float_reg_file[scob_old.mult_func[1].src1];
+                    operands->fmult_opB = float_reg_file[scob_old.mult_func[1].src2];
                     break;  
                 // fsub
                 case 14:
-                    operands->fadd_opA = float_reg_file[scob_old.func_status[i].src1];
-                    operands->fadd_opB = float_reg_file[scob_old.func_status[i].src2];
+                    operands->fadd_opA = float_reg_file[scob_old.add_func[1].src1];
+                    operands->fadd_opB = float_reg_file[scob_old.add_func[1].src2];
                     break;  
                 // ld
                 case 15:
-                    operands->load_A = int_reg_file[scob_old.func_status[i].src1];
+                    operands->load_A = int_reg_file[scob_old.load_func.src1];
                     operands->load_B = fetch_buf.load.type1.label;
                     break;  
                 // sd
                 case 16:
                     // src value to store
-                    operands->store_A = float_reg_file[scob_old.func_status[i].src1];
+                    operands->store_A = float_reg_file[scob_old.load_func.src1];
                     // offset = offset + value in integer register
-                    operands->load_B = fetch_buf.load.type1.label + int_reg_file[scob_old.func_status[i].dest];
+                    operands->load_B = fetch_buf.load.type1.label + int_reg_file[scob_old.load_func.dest];
                     break;  
             }
-        }
+        end:;
     }
 
 }
@@ -666,115 +727,115 @@ void scoreboard_issue(struct scoreboard *scob, struct instruction_container inst
     
     //Issue the Instructions that use Integer FU
     if(op < 12 && op >= 0){
-            scob->func_status[0].busy = true;
-            scob->func_status[0].op = op;
+            scob->int_func[0].busy = true;
+            scob->int_func[0].op = op;
         if(type == 1){
             // ADDI LB SUBI
             if((unsigned int) op == 0 ||  (unsigned int) op == 6 || (unsigned int) op == 8){
-                scob->func_status[0].dest = instruction.type1.r_dest;
-                scob->func_status[0].src1 = instruction.type1.r_src;
-                scob->func_status[0].src2 = -1;
-                scob->func_status[0].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[0].src1, 0);
-                scob->func_status[0].Fu_src2 = -1;
-                scob->func_status[0].src1_ready = check_waw(scob->reg_status, scob->func_status[0].src1, 0);
-                scob->func_status[0].src2_ready = true;
+                scob->int_func[0].dest = instruction.type1.r_dest;
+                scob->int_func[0].src1 = instruction.type1.r_src;
+                scob->int_func[0].src2 = -1;
+                scob->int_func[0].Fu_src1 = get_src_fu(scob->reg_status, scob->int_func[0].src1, 0);
+                scob->int_func[0].Fu_src2 = -1;
+                scob->int_func[0].src1_ready = check_waw(scob->reg_status, scob->int_func[0].src1, 0);
+                scob->int_func[0].src2_ready = true;
             }
             // BGE BNE
             if((unsigned int) op == 3 || (unsigned int)op == 4){
-                scob->func_status[0].dest = -1;
-                scob->func_status[0].src1 = instruction.type1.r_dest;
-                scob->func_status[0].src2 = instruction.type1.r_src;
-                scob->func_status[0].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[0].src1, 0);
-                scob->func_status[0].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[0].src2, 0);
-                scob->func_status[0].src1_ready = check_waw(scob->reg_status, scob->func_status[0].src1, 0);
-                scob->func_status[0].src2_ready = check_waw(scob->reg_status, scob->func_status[0].src2, 0);
+                scob->int_func[0].dest = -1;
+                scob->int_func[0].src1 = instruction.type1.r_dest;
+                scob->int_func[0].src2 = instruction.type1.r_src;
+                scob->int_func[0].Fu_src1 = get_src_fu(scob->reg_status, scob->int_func[0].src1, 0);
+                scob->int_func[0].Fu_src2 = get_src_fu(scob->reg_status, scob->int_func[0].src2, 0);
+                scob->int_func[0].src1_ready = check_waw(scob->reg_status, scob->int_func[0].src1, 0);
+                scob->int_func[0].src2_ready = check_waw(scob->reg_status, scob->int_func[0].src2, 0);
             }
             // ADD
             else{
-            scob->func_status[0].dest = instruction.type1.r_dest;
-            scob->func_status[0].src1 = instruction.type1.r_src;
-            scob->func_status[0].src2 = instruction.type1.label;
-            scob->func_status[0].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[0].src1, 0);
-            scob->func_status[0].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[0].src2, 0);
-            scob->func_status[0].src1_ready = check_waw(scob->reg_status, scob->func_status[0].src1, 0);
-            scob->func_status[0].src2_ready = check_waw(scob->reg_status, scob->func_status[0].src2, 0);
+            scob->int_func[0].dest = instruction.type1.r_dest;
+            scob->int_func[0].src1 = instruction.type1.r_src;
+            scob->int_func[0].src2 = instruction.type1.label;
+            scob->int_func[0].Fu_src1 = get_src_fu(scob->reg_status, scob->int_func[0].src1, 0);
+            scob->int_func[0].Fu_src2 = get_src_fu(scob->reg_status, scob->int_func[0].src2, 0);
+            scob->int_func[0].src1_ready = check_waw(scob->reg_status, scob->int_func[0].src1, 0);
+            scob->int_func[0].src2_ready = check_waw(scob->reg_status, scob->int_func[0].src2, 0);
             }
         }
         if(type == 2){
             scob->reg_status.r_reg_status[instruction.type2.r_target] = 0;
-            scob->func_status[0].dest = instruction.type2.r_target;
-            scob->func_status[0].src1 = -1;
-            scob->func_status[0].src2 = -1;
-            scob->func_status[0].Fu_src1 = -1;
-            scob->func_status[0].Fu_src2 = -1;
-            scob->func_status[0].src1_ready = true;
-            scob->func_status[0].src2_ready = true;
+            scob->int_func[0].dest = instruction.type2.r_target;
+            scob->int_func[0].src1 = -1;
+            scob->int_func[0].src2 = -1;
+            scob->int_func[0].Fu_src1 = -1;
+            scob->int_func[0].Fu_src2 = -1;
+            scob->int_func[0].src1_ready = true;
+            scob->int_func[0].src2_ready = true;
             if((unsigned int) op == 2){
-                scob->func_status[0].src1 = instruction.type2.r_target;
-                scob->func_status[0].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[0].src1, 0);
-                scob->func_status[0].src1_ready = check_waw(scob->reg_status, scob->func_status[0].src1, 0);
+                scob->int_func[0].src1 = instruction.type2.r_target;
+                scob->int_func[0].Fu_src1 = get_src_fu(scob->reg_status, scob->int_func[0].src1, 0);
+                scob->int_func[0].src1_ready = check_waw(scob->reg_status, scob->int_func[0].src1, 0);
             }
         }
-        scob->reg_status.r_reg_status[scob->func_status[0].dest] = 0;
-        scob->instr_status.r_stage = 2;
+        scob->reg_status.r_reg_status[scob->mult_func[0].dest] = 0;
+        scob->int_stat[0].r_stage = 2;
     }
     //Issue the instructions that use the FLOAT ADDER and SUB
     if((unsigned int)op == 12  || (unsigned int)op == 14){
                 scob->reg_status.f_reg_status[instruction.type1.r_dest] = 1;
                 // Only type 1 instructions for FLOAT  
-                scob->func_status[1].busy = true;
-                scob->func_status[1].op = op;
-                scob->func_status[1].dest = instruction.type1.r_dest;
-                scob->func_status[1].src1 = instruction.type1.r_src;
-                scob->func_status[1].src2 = instruction.type1.label;
-                scob->func_status[1].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[1].src1, 1);
-                scob->func_status[1].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[1].src2, 1);
-                scob->func_status[1].src1_ready = check_waw(scob->reg_status, scob->func_status[1].src1, 1);
-                scob->func_status[1].src2_ready = check_waw(scob->reg_status, scob->func_status[1].src2, 1);
-                scob->instr_status.fadd_stage = 2;
+                scob->add_func[0].busy = true;
+                scob->add_func[0].op = op;
+                scob->add_func[0].dest = instruction.type1.r_dest;
+                scob->add_func[0].src1 = instruction.type1.r_src;
+                scob->add_func[0].src2 = instruction.type1.label;
+                scob->add_func[0].Fu_src1 = get_src_fu(scob->reg_status, scob->add_func[0].src1, 1);
+                scob->add_func[0].Fu_src2 = get_src_fu(scob->reg_status, scob->add_func[0].src2, 1);
+                scob->add_func[0].src1_ready = check_waw(scob->reg_status, scob->add_func[0].src1, 1);
+                scob->add_func[0].src2_ready = check_waw(scob->reg_status, scob->add_func[0].src2, 1);
+                scob->add_func[0].fadd_stage = 2;
     }
         // Mult
         if((unsigned int)op == 13){
                 scob->reg_status.f_reg_status[instruction.type1.r_dest] = 2;
-                scob->func_status[2].busy = true;
-                scob->func_status[2].op = op;
-                scob->func_status[2].dest = instruction.type1.r_dest;
-                scob->func_status[2].src1 = instruction.type1.r_src;
-                scob->func_status[2].src2 = instruction.type1.label;
-                scob->func_status[2].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[2].src1, 1);
-                scob->func_status[2].Fu_src2 = get_src_fu(scob->reg_status, scob->func_status[2].src2, 1);
-                scob->func_status[2].src1_ready = check_waw(scob->reg_status, scob->func_status[2].src1, 1);
-                scob->func_status[2].src2_ready = check_waw(scob->reg_status, scob->func_status[2].src2, 1);
-                scob->instr_status.fmult_stage = 2;
+                scob->mult_func[0].busy = true;
+                scob->mult_func[0].op = op;
+                scob->mult_func[0].dest = instruction.type1.r_dest;
+                scob->mult_func[0].src1 = instruction.type1.r_src;
+                scob->mult_func[0].src2 = instruction.type1.label;
+                scob->mult_func[0].Fu_src1 = get_src_fu(scob->reg_status, scob->mult_func[0].src1, 1);
+                scob->mult_func[0].Fu_src2 = get_src_fu(scob->reg_status, scob->mult_func[0].src2, 1);
+                scob->mult_func[0].src1_ready = check_waw(scob->reg_status, scob->mult_func[0].src1, 1);
+                scob->mult_func[0].src2_ready = check_waw(scob->reg_status, scob->mult_func[0].src2, 1);
+                scob->mult_stat.fmult_stage = 2;
         }
         //Load
         if((unsigned int)op == 15){
                 scob->reg_status.f_reg_status[instruction.type1.r_dest] = 3;
-                scob->func_status[3].busy = true;
-                scob->func_status[3].op = op;
-                scob->func_status[3].dest = instruction.type1.r_dest;
-                scob->func_status[3].src1 = instruction.type1.r_src;
-                scob->func_status[3].src2 = -1;
-                scob->func_status[3].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[3].src1, 0);
-                scob->func_status[3].Fu_src2 = -1;
-                scob->func_status[3].src1_ready = check_waw(scob->reg_status, scob->func_status[3].src1, 0);
-                scob->func_status[3].src2_ready = true;
-                scob->instr_status.fload_stage = 2;
-                scob->func_status[3].time = 2;
+                scob->load_func.busy = true;
+                scob->load_func.op = op;
+                scob->load_func.dest = instruction.type1.r_dest;
+                scob->load_func.src1 = instruction.type1.r_src;
+                scob->load_func.src2 = -1;
+                scob->load_func.Fu_src1 = get_src_fu(scob->reg_status, scob->load_func.src1, 0);
+                scob->load_func.Fu_src2 = -1;
+                scob->load_func.src1_ready = check_waw(scob->reg_status, scob->load_func.src1, 0);
+                scob->load_func.src2_ready = true;
+                scob->load_stat.fload_stage = 2;
+                scob->load_func.time = 2;
         }
         // Store
         if((unsigned int)op == 16){
-                scob->func_status[3].busy = true;
-                scob->func_status[3].op = op;
-                scob->func_status[3].dest = instruction.type1.r_src;
-                scob->func_status[3].src1 = instruction.type1.r_dest;
-                scob->func_status[3].src2 = -1;
-                scob->func_status[3].Fu_src1 = get_src_fu(scob->reg_status, scob->func_status[3].src1, 0);
-                scob->func_status[3].Fu_src2 = -1;
-                scob->func_status[3].src1_ready = check_waw(scob->reg_status, scob->func_status[3].src1, 0);
-                scob->func_status[3].src2_ready = true;
-                scob->instr_status.fload_stage = 2;
-                scob->func_status[3].time = 2;
+                scob->load_func.busy = true;
+                scob->load_func.op = op;
+                scob->load_func.dest = instruction.type1.r_src;
+                scob->load_func.src1 = instruction.type1.r_dest;
+                scob->load_func.src2 = -1;
+                scob->load_func.Fu_src1 = get_src_fu(scob->reg_status, scob->load_func.src1, 0);
+                scob->load_func.Fu_src2 = -1;
+                scob->load_func.src1_ready = check_waw(scob->reg_status, scob->load_func.src1, 0);
+                scob->load_func.src2_ready = true;
+                scob->load_stat.fload_stage = 2;
+                scob->load_func.time = 2;
         }
 
 }
@@ -824,7 +885,7 @@ bool instruction_issue(mem_addr *pc, struct scoreboard scob_old, struct scoreboa
     
 
     // Check to see if the FUNC UNIT is already in use
-    if(check_struct(scob_old.func_status[get_functional_unit(op)], op) == true){
+    if(check_struct(scob_old, op) == true){
         printf("Stalling! Structure hazard. \n");
         *pc -= 1;
         return false;
@@ -849,15 +910,15 @@ void set_fetch_buffer(struct fetch_buf *buf, struct instruction_container instr,
     // Integer
     if(op < 12 && op >= 0){
         // 0 is integer unit
-        buf->integer = instr;
+        buf->integer[0] = instr;
     }
     //Fpoint add and sub
     if(op == 12 || op == 14){
-        buf->f_add = instr;
+        buf->f_add[0] = instr;
     }
     // Fmult
     if(op == 13){
-        buf->f_mult = instr;
+        buf->f_mult[0] = instr;
     }
     // LOAD/STORE
     if(op == 15 || op == 16){
@@ -887,30 +948,30 @@ bool check_waw(struct reg_status reg_stat, mem_word reg_dest, int r_or_f){
     return true;
 }
 
-bool check_struct(struct func_status fu_status, unsigned int op){
+bool check_struct(struct scoreboard score, unsigned int op){
     int i = 0;
     //All using integer unit
     if((unsigned int)op < 12 && (unsigned int)op >= 0){
         // 0 is integer unit
-        if(fu_status.busy == true){
+        if(score.int_func[0].busy == true){
             return true; 
         }
     }
     //Fpoint add and sub
     if((unsigned int)op == 12 || (unsigned int)op == 14){
-        if(fu_status.busy == true){
+        if(score.add_func[0].busy == true){
             return true; 
         }
     }
     // Fmult
     if((unsigned int)op == 13){
-        if(fu_status.busy == true){
+        if(score.mult_status[0].busy == true){
             return true; 
         }
     }
     // LOAD/STORE
     if((unsigned int)op == 15 || (unsigned int)op == 16){
-        if(fu_status.busy == true){
+        if(score.load_status.busy == true){
             return true; 
         }
     }

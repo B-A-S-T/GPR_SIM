@@ -42,11 +42,13 @@ fsub $f6, $f10, $f1
 fmult $f11, $f3, $f5
 fsub $f7, $f11, $f4
 
+sd $f2, ($2)
 ld $f1, ($2)
 
 sd $f6, ($25)
 ld $f2, ($25)
 
+sd $f5, ($5)
 ld $f4, ($5)
 
 sd $f7, ($26)
